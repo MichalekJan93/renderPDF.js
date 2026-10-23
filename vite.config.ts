@@ -16,6 +16,7 @@ export default defineConfig({
       'dist/**',
       'node_modules/**',
       'artifacts/**',
+      'docs/**',
       'test-results/**',
       'playwright-report/**',
     ],
@@ -154,7 +155,7 @@ export default defineConfig({
       'playwright-report',
       'package-lock.json',
       'public/fonts',
-      'docs/project-specification.md',
+      'docs',
     ],
   },
   // Full browser/PDF comparisons remain in the separate Playwright suite.

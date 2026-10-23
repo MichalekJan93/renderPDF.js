@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/renderpdf-logo.png" alt="RenderPDF.js logo" width="560" />
+</p>
+
 # RenderPDF.js
 
 An open-source TypeScript library for converting HTML/CSS to PDF in the browser,
@@ -154,8 +158,6 @@ enforced. Unsupported visible behavior must fail rather than silently produce an
 apparently successful export.
 Direct text overlapping later visible paint is also rejected when the simple
 ordered paint list cannot reproduce the browser's block/inline paint phases.
-
-See [rendering measurements](docs/feasibility.md) for evidence and comparison tolerances.
 
 ## Development
 

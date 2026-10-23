@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic legacy statement</title>
+    <style>
+      /* Intentionally retain legacy FONT markup to exercise browser-measured table layout. */
+      font.normal {
+        font-family: Tahoma;
+        font-size: 9pt;
+      }
+      font.normalBold {
+        font-family: Tahoma;
+        font-size: 9pt;
+        font-weight: bold;
+      }
+      font.header {
+        font-family: Tahoma;
+        font-size: 12pt;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- All content is synthetic; this fixture contains no real statement information. -->
+    <table border="0" width="100%">
+      <tr>
+        <td width="160" rowspan="2"><font class="normalBold">Zkušební dokument</font></td>
+        <td colspan="2"><font class="normal">Ukázka sloučených buněk</font></td>
+      </tr>
+      <tr>
+        <td><font class="normal">Číslo vzorku:</font></td>
+        <td><font class="normal">TEST 000</font></td>
+      </tr>
+    </table>
+    <br /><br />
+    <center><font class="header">Zkušební informativní výpis</font></center>
+    <p><font class="normal">Příliš žluťoučký kůň úpěl ďábelské ódy.</font></p>
+    <p><font class="normalBold">Přehled zkušebních dob:</font></p>
+    <table border="0" width="100%">
+      <tr>
+        <td width="90"><font class="normalBold">Identifikátor</font></td>
+        <td width="85"><font class="normalBold">Doba Od</font></td>
+        <td width="85"><font class="normalBold">Doba Do</font></td>
+        <td width="45" align="right"><font class="normalBold">Dny</font></td>
+        <td><font class="normalBold">Druh doby</font></td>
+        <td width="90" align="right"><font class="normalBold">Kontrola</font></td>
+      </tr>
+      <!-- SYNTHETIC_ROWS -->
+    </table>
+    <p><font class="normalBold">Konec zkušebního výpisu.</font></p>
+  </body>
+</html>

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>RenderPDF.js — Phase 2 + 3</title>
+  </head>
+  <body>
+    <header class="hybrid-controls">
+      <h1>RenderPDF.js · automatické rastry a stránkování</h1>
+      <p>
+        Gradienty a vnitřní stíny nemají ruční značku pro rasterizaci. Stránky řídí také CSS zlomy.
+      </p>
+      <p><a href="/document.html">Otevřít vlastní HTML</a> · <a href="/">Původní experiment</a></p>
+      <button id="hybrid-export" type="button" disabled>Stáhnout PDF</button>
+      <p id="hybrid-status" role="status">Načítání registrovaných fontů…</p>
+    </header>
+    <main id="hybrid-source">
+      <h1>Český dokument s lokálními efekty</h1>
+      <p>Nadpis a tento odstavec zůstávají nativním, vybíratelným PDF textem.</p>
+      <div class="hybrid-gradient">
+        <strong>Automaticky zachycená karta</strong>
+        <p>Zaoblení a gradient vykreslí prohlížeč. Text má také neviditelnou vrstvu pro hledání.</p>
+        <div class="hybrid-nested">Vnořený gradient patří do stejného obrázku.</div>
+      </div>
+      <div class="hybrid-inset">
+        Samostatný blok s vnitřním stínem se zachytí jen ve svých mezích.
+      </div>
+      <section class="hybrid-new-page">
+        <h2>Nová stránka podle CSS</h2>
+        <p>Tato část má nastavený zlom před prvkem. Původní DOM zůstává souvislý.</p>
+        <p>
+          Delší odstavce se dělí pouze mezi změřenými textovými řádky. Příliš žluťoučký kůň úpěl
+          ďábelské ódy. Prohlížeč určuje zalamování, rozestupy a pozice jednotlivých slov. Delší
+          odstavce se dělí pouze mezi změřenými textovými řádky. Příliš žluťoučký kůň úpěl ďábelské
+          ódy. Prohlížeč určuje zalamování, rozestupy a pozice jednotlivých slov. Delší odstavce se
+          dělí pouze mezi změřenými textovými řádky. Příliš žluťoučký kůň úpěl ďábelské ódy.
+          Prohlížeč určuje zalamování, rozestupy a pozice jednotlivých slov.
+        </p>
+        <div class="hybrid-keep">
+          <strong>Tento malý blok zůstává pohromadě</strong>
+          <p>
+            Pokud se nevejde do zbytku stránky, přesune se na další stránku díky break-inside:
+            avoid.
+          </p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Skupina</th>
+              <th>Česká položka</th>
+              <th>Částka</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td rowspan="2">Společná buňka</td>
+              <td>První měření</td>
+              <td>100 Kč</td>
+            </tr>
+            <tr>
+              <td>Druhé měření</td>
+              <td>200 Kč</td>
+            </tr>
+            <tr>
+              <td>Samostatná</td>
+              <td>Třetí měření</td>
+              <td>300 Kč</td>
+            </tr>
+            <tr>
+              <td>Samostatná</td>
+              <td>Čtvrté měření</td>
+              <td>400 Kč</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="hybrid-page-end">Za tímto odstavcem následuje další vynucený zlom.</p>
+      </section>
+      <section>
+        <h2>Konec ukázky</h2>
+        <p>Text před i za rastry a zlomy má zůstat úplný a bez viditelných duplikátů.</p>
+      </section>
+    </main>
+    <script type="module" src="/experiments/hybrid.ts"></script>
+  </body>
+</html>

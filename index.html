@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>RenderPDF.js — Phase 0</title>
+  </head>
+  <body>
+    <header class="controls">
+      <h1>RenderPDF.js · Phase 0</h1>
+      <p>Browser layout + selectable PDF text + local raster regions.</p>
+      <p>
+        <a href="/document.html">Otevřít HTML a stáhnout PDF</a> ·
+        <a href="/hybrid.html">Phase 2 + 3</a>
+      </p>
+      <button id="export" type="button" disabled>Stáhnout experiment PDF</button>
+      <p id="status" role="status">Načítání registrovaných fontů…</p>
+    </header>
+    <main id="source">
+      <h1>RenderPDF.js: technický experiment</h1>
+      <p>Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
+      <p><strong>Tučný text</strong> a <em>Kurzíva</em> zůstávají skutečným textem.</p>
+      <p id="typography">
+        AV To WA office affinity ffi — kerning a ligatury měříme, přesnou shodu neslibujeme.
+      </p>
+      <p class="wrap">
+        Tento odstavec ověřuje zalamování podle skutečného browser layoutu. Česká diakritika musí
+        přežít export i extrakci textu. Pozice řádků určuje prohlížeč a knihovna je pouze přenáší do
+        souřadnic PDF.
+      </p>
+      <div class="flex">
+        <div class="card">
+          <strong>Flexbox vlevo</strong>
+          <p>První karta, 220 px.</p>
+        </div>
+        <div class="card">
+          <strong>Flexbox uprostřed</strong>
+          <p>Druhá karta.</p>
+        </div>
+        <div class="card">
+          <strong>Flexbox vpravo</strong>
+          <p>Třetí karta.</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="cell">Grid A</div>
+        <div class="cell">Grid B</div>
+        <div class="cell">Grid C</div>
+        <div class="cell">Grid D</div>
+      </div>
+      <p>Vektorový text před lokálním rastrem.</p>
+      <section class="raster" data-raster>
+        <strong>Rastrová oblast žije.</strong>
+        <p>Gradient, zaoblení a vnitřní stín. Text má neviditelnou PDF vrstvu.</p>
+      </section>
+      <p>Vektorový text po lokálním rastru.</p>
+      <img id="bitmap" width="64" height="40" alt="Kontrolní bitmapa" />
+      <div class="page-probe">
+        <p>Řádek poblíž automatického zlomu stránky.</p>
+        <p>Další řádek nesmí zmizet ani se opakovat.</p>
+        <p>Souřadnice textu a obrázků sdílejí stejný posun.</p>
+      </div>
+      <section class="raster second-raster" data-raster>
+        <strong>Rastr na druhé stránce.</strong>
+        <p>I neviditelný text používá souřadnice druhé stránky.</p>
+      </section>
+      <p>Konec druhé stránky.</p>
+    </main>
+    <script type="module" src="/experiments/demo.ts"></script>
+  </body>
+</html>

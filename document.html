@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>RenderPDF.js — HTML do PDF</title>
+  </head>
+  <body>
+    <header class="document-toolbar">
+      <div>
+        <h1>Náhled HTML a export PDF</h1>
+        <p id="document-name">Informativní výpis konta</p>
+      </div>
+      <div class="document-actions">
+        <label for="document-file">Otevřít HTML</label>
+        <input id="document-file" type="file" accept=".html,.htm,text/html" />
+        <button id="document-export" type="button" disabled>Stáhnout PDF</button>
+      </div>
+      <p id="document-status" role="status" aria-live="polite">Načítání dokumentu…</p>
+      <p class="document-note" id="document-font"></p>
+      <p class="document-note">
+        PDF zachová vybíratelný text. Vstup: statické HTML v UTF-8. Původní speciální tiskové
+        záhlaví a zápatí nejsou součástí tohoto náhledu.
+      </p>
+    </header>
+    <div id="document-preview"></div>
+    <script type="module" src="/experiments/document.ts"></script>
+  </body>
+</html>

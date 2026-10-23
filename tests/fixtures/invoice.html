@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic public API invoice</title>
+    <style>
+      /* The browser lays out this bounded fixture before the library measures it. */
+      body {
+        margin: 0;
+      }
+      #invoice {
+        box-sizing: border-box;
+        width: 960px;
+        padding: 12px;
+        color: #17263a;
+        background: white;
+        font: 14px/1.5 'Invoice Sans';
+      }
+      h1,
+      p {
+        margin: 0 0 12px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      .heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+      }
+      .parties {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        margin-bottom: 16px;
+      }
+      .party {
+        border: 1px solid #a7b1be;
+        padding: 12px;
+      }
+      .accent {
+        font-family: 'Invoice Accent';
+        font-style: italic;
+      }
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 2px;
+      }
+      th,
+      td {
+        border: 1px solid #a7b1be;
+        padding: 5px 8px;
+        text-align: left;
+      }
+      .stamp {
+        width: 270px;
+        padding: 12px;
+        margin-top: 16px;
+        background: linear-gradient(110deg, #e4eefb, #f5e8ff);
+        border-radius: 8px;
+      }
+      .footer {
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Fictional names and totals keep browser evidence safe to retain locally. -->
+    <main id="invoice">
+      <div class="heading">
+        <h1>Zkušební faktura TEST 001</h1>
+        <img id="invoice-logo" width="48" height="32" alt="Synthetic colored logo" />
+      </div>
+      <div class="parties">
+        <div class="party">
+          <p><strong>Dodavatel: Ukázková společnost</strong></p>
+          <p>Česká 12, Zkušební město</p>
+        </div>
+        <div class="party">
+          <p><strong>Odběratel: Testovací zákazník</strong></p>
+          <p class="accent">Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Položka</th>
+            <th>Popis</th>
+            <th>Kontrolní značka</th>
+          </tr>
+        </thead>
+        <tbody id="invoice-rows">
+          <!-- Synthetic rows are added by the browser test before measurement. -->
+        </tbody>
+      </table>
+      <div class="stamp" data-raster>Rastrové potvrzení žije.</div>
+      <p class="footer"><strong>Konec zkušební faktury.</strong></p>
+    </main>
+  </body>
+</html>

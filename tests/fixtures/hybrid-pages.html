@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic hybrid pagination fixture</title>
+    <style>
+      /* Whole-pixel geometry keeps browser/PDF comparisons independent from image alignment. */
+      body {
+        margin: 0;
+      }
+      #hybrid {
+        display: flow-root;
+        width: 460px;
+        color: #15283d;
+        background: white;
+        font: 14px/20px 'Hybrid Sans';
+      }
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+      h1,
+      h2 {
+        font-size: 20px;
+        line-height: 28px;
+      }
+      .card {
+        box-sizing: border-box;
+        width: 420px;
+        height: 100px;
+        padding: 12px;
+        margin: 12px 0;
+        border-radius: 10px;
+        background: linear-gradient(110deg, #dbeafa, #f0dff8);
+      }
+      .nested-effect {
+        padding: 4px;
+        margin-top: 8px;
+        border-radius: 6px;
+        background: linear-gradient(90deg, #f9e9b9, #f7d7c7);
+      }
+      .inset-card {
+        box-sizing: border-box;
+        width: 420px;
+        height: 64px;
+        padding: 12px;
+        margin: 12px 0;
+        box-shadow: inset 0 0 0 4px #5b3f7d;
+        background: #e4f4e9;
+        opacity: 0.85;
+      }
+      .keep-together {
+        break-inside: avoid;
+      }
+      .break-before {
+        break-before: page;
+      }
+      .break-after {
+        break-after: page;
+      }
+      .atomic-card {
+        box-sizing: border-box;
+        height: 140px;
+        padding: 10px;
+        border: 1px solid #a5b1bd;
+        background: #f2f6fa;
+      }
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 2px;
+      }
+      th,
+      td {
+        padding: 4px;
+        border: 1px solid #a5b1bd;
+        text-align: left;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- All labels are synthetic; this fixture contains no private document data. -->
+    <main id="hybrid">
+      <h1>Nativní český nadpis</h1>
+      <p>Vektorový začátek zůstává vyhledatelný.</p>
+      <div id="auto-card" class="card">
+        <p>Žluťoučká karta má místní raster.</p>
+        <p class="nested-effect">Vnořený efekt se vykreslí jednou.</p>
+      </div>
+      <div id="auto-inset" class="inset-card">
+        <p>Vnitřní stín zachová český text.</p>
+      </div>
+      <p>Nativní konec: příliš žluťoučký kůň.</p>
+    </main>
+  </body>
+</html>

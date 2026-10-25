@@ -3,6 +3,15 @@ import { assertAutomaticRasterBoundary, automaticRasterReason } from './planner.
 import type { RegisteredFont } from './api-types.js';
 import type { Bounds, LayoutSnapshot, PaintOperation, TextOperation } from './types.js';
 
+/** Grapheme boundaries are locale independent for the supported Latin text. */
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+/** Reuse exact loaded-face metrics within one synchronous measurement only. */
+interface TextMetricsCache {
+  context: CanvasRenderingContext2D;
+  fonts: Map<string, { ascent: number; descent: number }>;
+}
+
 /** Translate viewport geometry into the single root-relative CSS pixel system.
  * @param rectangle Browser-calculated viewport rectangle.
  * @param origin Source root's viewport rectangle.
@@ -185,14 +194,14 @@ function validateDisplay(element: HTMLElement, style: CSSStyleDeclaration): void
  * @param node Text node whose parent provides the effective font and color.
  * @param origin Source root's viewport rectangle.
  * @param fonts Exact registered faces available to the PDF writer.
- * @param context Canvas context used only to estimate font baseline metrics.
+ * @param cache Canvas font metrics already checked during this synchronous snapshot.
  * @param invisible Whether text belongs to an already rasterized subtree.
  */
 function measureText(
   node: Text,
   origin: DOMRect,
   fonts: readonly RegisteredFont[],
-  context: CanvasRenderingContext2D,
+  cache: TextMetricsCache,
   invisible: boolean,
 ): TextOperation[] {
   // A detached text node has no browser-resolved font or meaningful geometry.
@@ -224,51 +233,70 @@ function measureText(
     style.writingMode !== 'horizontal-tb' ||
     style.textTransform !== 'none' ||
     style.whiteSpace !== 'normal' ||
+    node.data.includes('\u00ad') ||
+    style.hyphens === 'auto' ||
     (style.letterSpacing !== 'normal' && style.letterSpacing !== '0px') ||
     (style.wordSpacing !== 'normal' && style.wordSpacing !== '0px') ||
-    style.fontVariantCaps !== 'normal'
+    style.fontVariantCaps !== 'normal' ||
+    style.fontVariantAlternates !== 'normal' ||
+    style.fontVariantLigatures !== 'normal' ||
+    style.fontVariantNumeric !== 'normal' ||
+    style.fontVariantEastAsian !== 'normal' ||
+    style.fontVariantPosition !== 'normal' ||
+    style.fontFeatureSettings !== 'normal' ||
+    style.fontVariationSettings !== 'normal' ||
+    (style.fontStretch !== '100%' && style.fontStretch !== 'normal') ||
+    (style.fontSizeAdjust !== 'none' && style.fontSizeAdjust !== undefined) ||
+    !['auto', 'geometricPrecision'].includes(style.textRendering)
   ) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
-      'Unsupported CSS: text supports only untransformed horizontal LTR text with normal whitespace, spacing, and letter case.',
+      'Unsupported CSS: text requires horizontal LTR layout with normal whitespace, spacing, font variants and OpenType features, without automatic hyphenation or soft hyphens.',
     );
   }
   // FontFaceSet confirms this exact registered face has finished loading.
   const fontSize = Number.parseFloat(style.fontSize);
   // Canvas font metrics approximate a baseline that Range does not expose.
   const fontDescription = `${face.style} ${face.weight} ${fontSize}px "${face.family}"`;
-  // FontFaceSet.check alone also succeeds for unknown families resolved through fallback.
-  const loadedFace = Array.from(document.fonts).some((browserFace) => {
-    // Normalize author-provided aliases before comparing the explicit face contract.
-    const browserWeight =
-      browserFace.weight === 'normal'
-        ? 400
-        : browserFace.weight === 'bold'
-          ? 700
-          : Number(browserFace.weight);
-    return (
-      browserFace.family.replace(/^['"]|['"]$/g, '').toLowerCase() === face.family.toLowerCase() &&
-      browserWeight === face.weight &&
-      browserFace.style === face.style &&
-      browserFace.status === 'loaded'
-    );
-  });
-  if (!loadedFace || !document.fonts.check(fontDescription, node.data))
-    throw new RenderPDFError('MISSING_FONT', `Browser font is not loaded: ${fontDescription}.`);
-  context.font = fontDescription;
-  // Font bounding metrics cover accents consistently across lines, unlike actual ink bounds.
-  const metrics = context.measureText(node.data);
-  // The browser's em-box ascent and descent are preferable to guessing from font size.
-  const ascent = metrics.fontBoundingBoxAscent;
-  // Range height is rounded by Chromium, so center the metric box within it.
-  const descent = metrics.fontBoundingBoxDescent;
-  if (!Number.isFinite(ascent) || !Number.isFinite(descent))
-    throw new RenderPDFError(
-      'UNSUPPORTED_CSS',
-      'Font bounding metrics are unavailable in this browser.',
-    );
+  let metrics = cache.fonts.get(fontDescription);
+  if (!metrics) {
+    // FontFaceSet.check alone also succeeds for unknown families resolved through fallback.
+    const loadedFace = Array.from(document.fonts).some((browserFace) => {
+      // Normalize author-provided aliases before comparing the explicit face contract.
+      const browserWeight =
+        browserFace.weight === 'normal'
+          ? 400
+          : browserFace.weight === 'bold'
+            ? 700
+            : Number(browserFace.weight);
+      return (
+        browserFace.family.replace(/^['"]|['"]$/g, '').toLowerCase() ===
+          face.family.toLowerCase() &&
+        browserWeight === face.weight &&
+        browserFace.style === face.style &&
+        browserFace.status === 'loaded'
+      );
+    });
+    if (!loadedFace || !document.fonts.check(fontDescription, node.data))
+      throw new RenderPDFError('MISSING_FONT', `Browser font is not loaded: ${fontDescription}.`);
+    cache.context.font = fontDescription;
+    // Font bounding metrics cover accents consistently across lines, unlike actual ink bounds.
+    const measured = cache.context.measureText(node.data);
+    // The browser's em-box ascent and descent are preferable to guessing from font size.
+    const ascent = measured.fontBoundingBoxAscent;
+    // Range height is rounded by Chromium, so center the metric box within it.
+    const descent = measured.fontBoundingBoxDescent;
+    if (!Number.isFinite(ascent) || !Number.isFinite(descent))
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Font bounding metrics are unavailable in this browser.',
+      );
+    metrics = { ascent, descent };
+    cache.fonts.set(fontDescription, metrics);
+  }
+  const { ascent, descent } = metrics;
   // Grapheme boundaries preserve surrogate pairs and combining Czech/Latin marks.
-  const segments = new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(node.data);
+  const segments = graphemes.segment(node.data);
   // A reusable Range reads browser-produced geometry, not a synthetic line-breaking algorithm.
   const range = document.createRange();
   // Line ranges are collected before their complete text and horizontal extent are measured.
@@ -278,10 +306,21 @@ function measureText(
     range.setStart(node, segment.index);
     range.setEnd(node, segment.index + segment.segment.length);
     // Collapsed whitespace produces empty rectangles and should not create phantom runs.
-    const rectangle = Array.from(range.getClientRects()).find(
-      (item) => item.width > 0 && item.height > 0,
-    );
-    if (!rectangle) continue;
+    const rectangles = Array.from(range.getClientRects());
+    const rectangle = rectangles.find((item) => item.width > 0 && item.height > 0);
+    if (!rectangle) {
+      // Chromium can assign a ligature's entire width to an earlier text node.
+      if (
+        /[^\t\n\r\f ]/.test(segment.segment) &&
+        rectangles.some((item) => item.height > 0 && item.width === 0)
+      ) {
+        throw new RenderPDFError(
+          'UNSUPPORTED_CSS',
+          'Text shaping crosses an inline boundary or uses an unsupported zero-width glyph. Keep each shaped word in one text node.',
+        );
+      }
+      continue;
+    }
     // Adjacent visible glyphs with matching tops belong to one browser line.
     const previous = lines.at(-1);
     if (previous && Math.abs(previous.top - rectangle.top) < 0.5) {
@@ -314,7 +353,7 @@ function measureText(
     const runs = Array.from(sourceLine.matchAll(/[^\t\n\r\f ]+/g), (match) => {
       range.setStart(node, start + match.index);
       range.setEnd(node, start + match.index + match[0].length);
-      // Each word preserves its internal shaping; PDF placement still approximates kerning.
+      // Word origins belong to the browser; the writer preserves each word's shaped glyphs.
       const wordBounds = relativeBounds(range.getBoundingClientRect(), origin);
       return { text: match[0], x: wordBounds.x, width: wordBounds.width };
     });
@@ -329,6 +368,7 @@ function measureText(
         family: face.family,
         weight: face.weight,
         style: face.style,
+        kerning: style.fontKerning !== 'none',
         color: style.color,
         invisible,
       },
@@ -336,21 +376,16 @@ function measureText(
   });
 }
 
-/** Snapshot the supported static DOM subset as ordered, root-relative paint operations.
- * @param root Connected, visible HTMLElement whose existing browser layout is exported.
- * @param fonts Explicit faces used both by the browser and PDF embedding.
- * @param options Whether safe local effects may choose raster boundaries automatically.
+/** Validate source ownership, font descriptors, and ancestor effects before browser measurement.
+ * @param root Connected HTMLElement whose browser layout belongs to this document.
+ * @param fonts Explicit faces available to text measurement and PDF embedding.
+ * @param fallback Captured raster policy that must remain stable throughout preparation.
  */
-export async function snapshotLayout(
+function validateLayoutSource(
   root: HTMLElement,
   fonts: readonly RegisteredFont[],
-  options: {
-    /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
-    fallback?: 'auto' | 'strict';
-  } = {},
-): Promise<LayoutSnapshot> {
-  // Read the policy once so later caller option mutations cannot change traversal decisions.
-  const fallback = options.fallback ?? 'auto';
+  fallback: 'auto' | 'strict',
+): void {
   if (fallback !== 'auto' && fallback !== 'strict') {
     throw new RenderPDFError('INVALID_OPTIONS', 'Raster fallback must be auto or strict.');
   }
@@ -395,6 +430,24 @@ export async function snapshotLayout(
       );
     }
   }
+}
+
+/** Prepare browser resources, then snapshot the supported static DOM subset without changing it.
+ * @param root Connected, visible HTMLElement whose existing browser layout is exported.
+ * @param fonts Explicit faces used both by the browser and PDF embedding.
+ * @param options Whether safe local effects may choose raster boundaries automatically.
+ */
+export async function snapshotLayout(
+  root: HTMLElement,
+  fonts: readonly RegisteredFont[],
+  options: {
+    /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
+    fallback?: 'auto' | 'strict';
+  } = {},
+): Promise<LayoutSnapshot> {
+  // Capture the caller's policy before yielding, and reject invalid input before waiting on resources.
+  const fallback = options.fallback ?? 'auto';
+  validateLayoutSource(root, fonts, fallback);
   await document.fonts.ready;
   // Image decoding completes before any geometry is measured.
   const images = Array.from(root.querySelectorAll('img'));
@@ -410,6 +463,25 @@ export async function snapshotLayout(
       }
     }),
   );
+  return measurePreparedLayout(root, fonts, { fallback });
+}
+
+/** Measure settled browser resources synchronously so a source guard can share the same task.
+ * @param root Connected, visible HTMLElement with its fonts and source images already prepared.
+ * @param fonts Exact registered faces used both by the browser and PDF embedding.
+ * @param options Whether safe local effects may choose raster boundaries automatically.
+ */
+export function measurePreparedLayout(
+  root: HTMLElement,
+  fonts: readonly RegisteredFont[],
+  options: {
+    /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
+    fallback?: 'auto' | 'strict';
+  } = {},
+): LayoutSnapshot {
+  // Capture the policy once; this path deliberately performs no asynchronous resource preparation.
+  const fallback = options.fallback ?? 'auto';
+  validateLayoutSource(root, fonts, fallback);
   // One origin is shared by vector text, image bounds, and raster regions.
   const origin = root.getBoundingClientRect();
   if (origin.width <= 0 || origin.height <= 0)
@@ -422,7 +494,7 @@ export async function snapshotLayout(
   if (!contextCandidate)
     throw new RenderPDFError('INVALID_SOURCE', 'Canvas font measurement is unavailable.');
   // Capture the checked context as a non-null value for the recursive visitor.
-  const context: CanvasRenderingContext2D = contextCandidate;
+  const cache: TextMetricsCache = { context: contextCandidate, fonts: new Map() };
   // The list's order is the paint order for this deliberately restricted static subset.
   const operations: PaintOperation[] = [];
   // Browser rows and rowspan cells are indivisible intervals for the existing page mapper.
@@ -432,7 +504,7 @@ export async function snapshotLayout(
     {
       code: 'TEXT_METRICS_APPROXIMATED',
       message:
-        'Baselines are estimated from Canvas font metrics and PDF word advances are fitted to Range widths; glyph shaping and kerning are not guaranteed.',
+        'Baselines are estimated from Canvas font metrics; browser and PDF shaping engines may still differ for unsupported scripts or font features.',
     },
   ];
 
@@ -655,7 +727,7 @@ export async function snapshotLayout(
     // Child nodes, including inline text, retain source order within the restricted paint model.
     for (const child of element.childNodes) {
       if (child instanceof Text)
-        operations.push(...measureText(child, origin, fonts, context, invisible));
+        operations.push(...measureText(child, origin, fonts, cache, invisible));
       else if (child instanceof HTMLElement) visit(child, invisible, automatic);
       else if (child instanceof Element) {
         if (invisible)

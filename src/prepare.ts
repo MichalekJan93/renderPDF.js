@@ -40,6 +40,8 @@ export function prepareSource(
   let changed = false;
   // The fingerprint is set after resource readiness, when normal font/image layout has settled.
   let fingerprint: string | undefined;
+  // Repeated CSS names/values share an exact identifier for this export, never a cached DOM read.
+  const identifiers = new Map<string, number>();
   // Source changes, ancestor attributes and stylesheets can invalidate browser coordinates.
   const observer = new MutationObserver(() => {
     changed = true;
@@ -75,27 +77,32 @@ export function prepareSource(
     childList: true,
     characterData: true,
   });
+  // CSSOM lists the same browser-supported properties first, followed by element-specific custom names.
+  // Cache only those fixed names; every computed value is still read again at each assertion.
+  const standardProperties = Array.from(getComputedStyle(document.documentElement)).filter(
+    (property) => !property.startsWith('--'),
+  );
 
   /** Capture computed styles and root-relative geometry, including CSSOM-only stylesheet edits. */
   function currentFingerprint(): string {
-    // Stream into two independent 32-bit checksums instead of retaining megabytes of CSS strings.
+    // Stream exact value identifiers into two checksums without retaining every element's CSS.
     let primary = 2166136261;
     // The second accumulator makes accidental equality of distinct style states less likely.
     let secondary = 5381;
 
-    /** Include one delimited value without retaining intermediate per-element style snapshots. */
+    /** Intern complete CSSOM values once instead of hashing their characters millions of times. */
     function append(
       /** Computed value or coordinate fragment participating in the stable-state check. */
       value: string,
     ): void {
-      for (let index = 0; index < value.length; index += 1) {
-        // UTF-16 code units preserve all CSSOM serialization, including non-ASCII family values.
-        const unit = value.charCodeAt(index);
-        primary = Math.imul(primary ^ unit, 16777619);
-        secondary = Math.imul(secondary, 33) ^ unit;
+      // Keep the dictionary across assertions so any changed name or value keeps a distinct identity.
+      let identifier = identifiers.get(value);
+      if (identifier === undefined) {
+        identifier = identifiers.size + 1;
+        identifiers.set(value, identifier);
       }
-      primary = Math.imul(primary ^ 0, 16777619);
-      secondary = Math.imul(secondary, 33);
+      primary = Math.imul(primary ^ identifier, 16777619);
+      secondary = Math.imul(secondary, 33) ^ identifier;
     }
 
     /** Include computed paint inputs, omitting the declarations of nonexistent pseudo boxes. */
@@ -112,8 +119,16 @@ export function prepareSource(
         append(style.content);
         if (style.content === 'none' || style.content === 'normal') return;
       }
-      for (const property of style) {
-        append(property);
+      // Native indexed access also recomputes the property count; avoid it for the fixed prefix.
+      const length = style.length;
+      // Empty/partial declaration lists retain native enumeration instead of assuming a full schema.
+      const properties = length >= standardProperties.length ? standardProperties : [];
+      // Fixed property positions already identify their names; retain counts and dynamic names explicitly.
+      append(String(length));
+      for (let index = 0; index < length; index += 1) {
+        // Preserve all standard and custom property names, including changes with equal counts.
+        const property = properties[index] ?? style[index]!;
+        if (index >= properties.length) append(property);
         append(style.getPropertyValue(property));
       }
     }
@@ -150,7 +165,26 @@ export function prepareSource(
     }
   }
 
-  /** Settle browser resources before measuring, without modifying source markup or dimensions. */
+  /** Record the state immediately after synchronous measurement, without an intervening await. */
+  function captureBaseline(): void {
+    assertUnchanged();
+    // Running CSS animations produce time-dependent pixels even when no DOM mutation occurs.
+    if (
+      [
+        ...root.getAnimations({ subtree: true }),
+        ...ancestors.flatMap((element) => element.getAnimations()),
+      ].some((animation) => animation.playState === 'running')
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Pause source animations before rendering a PDF.',
+      );
+    }
+    // Synchronous measurement and this baseline observe one browser state in the same task.
+    fingerprint = currentFingerprint();
+  }
+
+  /** Settle browser resources once, without modifying source markup or dimensions. */
   async function ready(): Promise<void> {
     await withCancellation(document.fonts.ready, signal);
     try {
@@ -173,21 +207,7 @@ export function prepareSource(
       });
     }
     assertUnchanged();
-    // Running CSS animations produce time-dependent pixels even when no DOM mutation occurs.
-    if (
-      [
-        ...root.getAnimations({ subtree: true }),
-        ...ancestors.flatMap((element) => element.getAnimations()),
-      ].some((animation) => animation.playState === 'running')
-    ) {
-      throw new RenderPDFError(
-        'UNSUPPORTED_CSS',
-        'Pause source animations before rendering a PDF.',
-      );
-    }
-    // Resource loading may change intrinsic sizes; only the settled state is retained for later checks.
-    fingerprint = currentFingerprint();
   }
 
-  return { ready, assertUnchanged, dispose: () => observer.disconnect() };
+  return { ready, captureBaseline, assertUnchanged, dispose: () => observer.disconnect() };
 }

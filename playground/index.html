@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5180; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="description" content="Lokální zkouška převodu HTML do PDF pomocí RenderPDF.js." />
+    <link rel="icon" href="data:," />
+    <title>RenderPDF.js · HTML do PDF</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <p class="eyebrow">RenderPDF.js / Playground</p>
+        <h1>Z HTML do PDF</h1>
+        <p class="introduction">
+          Vložte HTML, prohlédněte si náhled a stáhněte výsledek. Vše se zpracovává lokálně v
+          prohlížeči; vložený dokument se nikam neodesílá.
+        </p>
+      </header>
+
+      <main class="workspace">
+        <section class="editor-panel" aria-labelledby="editor-title">
+          <div class="panel-heading">
+            <div>
+              <p class="step-label">01 / Vstup</p>
+              <h2 id="editor-title">Váš dokument</h2>
+            </div>
+            <button id="reset-example" class="button-secondary" type="button">Načíst ukázku</button>
+          </div>
+
+          <label for="html-input">HTML dokument</label>
+          <p id="input-help" class="field-help">
+            Vložte celý statický HTML dokument nebo jeho část včetně CSS. Skripty ani externí zdroje
+            nejsou podporované; obrázky lze vložit jako data PNG/JPEG. Nedostupné obrázky se označí
+            v náhledu a do doplnění blokují stažení PDF.
+          </p>
+          <textarea
+            id="html-input"
+            aria-describedby="input-help"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            placeholder="<h1>Můj dokument</h1>"
+          ></textarea>
+
+          <div class="actions">
+            <button id="refresh-preview" class="button-secondary" type="button">
+              Aktualizovat náhled
+            </button>
+            <button id="download-pdf" class="button-primary" type="button" disabled>
+              Stáhnout PDF
+            </button>
+          </div>
+          <p id="status" class="status" role="status" aria-live="polite">
+            Připravuji ukázkový dokument…
+          </p>
+          <ul id="warnings" class="warnings" aria-label="Omezení převodu" hidden></ul>
+
+          <aside class="rendering-note" aria-label="Nastavení převodu">
+            <strong>Stejný font v náhledu i v PDF</strong>
+            <p>
+              Text používá Noto Sans místo fontů z vloženého HTML. Export má formát A4 a okraje 24
+              CSS px. Knihovna je experimentální; podporuje omezenou sadu HTML a CSS.
+            </p>
+          </aside>
+        </section>
+
+        <section class="preview-panel" aria-labelledby="preview-title">
+          <div class="panel-heading preview-heading">
+            <div>
+              <p class="step-label">02 / Náhled</p>
+              <h2 id="preview-title">HTML před převodem</h2>
+            </div>
+            <span class="format-label">A4 · 100 %</span>
+          </div>
+          <p class="preview-help">
+            Náhled je souvislý; rozdělení na stránky proběhne při exportu do PDF.
+          </p>
+          <div class="preview-paper">
+            <div id="preview-host" aria-label="Náhled vloženého HTML"></div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        Samostatná testovací aplikace · používá zabalenou knihovnu renderpdf-js
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,22 +1,29 @@
 import fontkit from '@pdf-lib/fontkit';
 import {
   PDFDocument,
+  beginText,
   clip,
   endPath,
+  endText,
   popGraphicsState,
   pushGraphicsState,
   rectangle,
   rgb,
-  setCharacterSqueeze,
+  setFillingColor,
+  setFontAndSize,
+  setGraphicsState,
+  setTextMatrix,
   setTextRenderingMode,
+  showText,
   TextRenderingMode,
 } from 'pdf-lib';
-import type { PDFFont, PDFImage, PDFPage } from 'pdf-lib';
+import type { PDFFont, PDFImage, PDFName, PDFPage } from 'pdf-lib';
 import type { PageGeometry, RegisteredFont } from './api-types.js';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
 import { nativeImageFormat } from './images.js';
 import type { PageSlice } from './pagination.js';
 import { captureRaster } from './raster.js';
+import { PositionedFont } from './text.js';
 import type { Bounds, LayoutSnapshot, TextOperation } from './types.js';
 
 /** CSS reference pixels convert to PDF points only at this adapter boundary. */
@@ -48,6 +55,8 @@ interface EmbeddedFace {
   font: PDFFont;
   /** Code points supported by the embedded program, never a silent substitute. */
   characters: ReadonlySet<number>;
+  /** Shaped glyph origins and extraction maps reusable for repeated words. */
+  positioned: PositionedFont;
 }
 
 /** Parse the computed sRGB colors admitted by the supported layout subset. */
@@ -74,7 +83,7 @@ function matchingFont(
   text: TextOperation,
   /** Embedded programs and their reusable coverage sets. */
   faces: readonly EmbeddedFace[],
-): PDFFont {
+): EmbeddedFace {
   // Case-insensitive family matching follows the explicit browser registration contract.
   const face = faces.find(
     /** A face must match all three descriptors; a synthetic browser face is unsupported. */
@@ -97,44 +106,68 @@ function matchingFont(
       );
     }
   }
-  return face.font;
+  return face;
 }
 
-/** Paint measured words at browser origins while retaining each word's ligatures. */
+/** Page resource names are reused without depending on private PDFPage fields. */
+interface TextResources {
+  /** Public font references registered once for each page and exact face. */
+  fonts: Map<PDFFont, PDFName>;
+  /** Text opacity resources shared by equal alpha values within this page. */
+  opacity: Map<number, PDFName>;
+}
+
+/** Paint shaped glyphs at measured word origins without scaling glyph outlines. */
 function drawLine(
   /** PDF page owning this complete measured line. */
   page: PDFPage,
   /** Browser line origins and baseline in source CSS pixels. */
   text: TextOperation,
   /** Matching embedded font program. */
-  font: PDFFont,
+  face: EmbeddedFace,
   /** Inclusive source top of the current page, in CSS pixels. */
   start: number,
   /** Page edges and margins in CSS pixels. */
   geometry: PageGeometry,
+  /** Resource caches owned by this one PDF page. */
+  resources: TextResources,
 ): void {
   // Text rendering mode 3 preserves extraction without painting a second visible copy.
   const color = parseColor(text.color);
-  for (const run of text.runs) {
-    // pdf-lib discards fontkit positioning; shorter runs limit accumulated advance drift.
-    const nativeWidth = font.widthOfTextAtSize(run.text, text.fontSize);
-    // shortcut: word-width fitting approximates kerning until positioned glyphs are supported.
-    const squeeze = nativeWidth > 0 ? (run.width / nativeWidth) * 100 : 100;
-    page.pushOperators(
-      pushGraphicsState(),
-      setCharacterSqueeze(squeeze),
-      setTextRenderingMode(text.invisible ? TextRenderingMode.Invisible : TextRenderingMode.Fill),
-    );
-    page.drawText(run.text, {
-      font,
-      size: text.fontSize * PX_TO_PT,
-      x: (geometry.margin.left + run.x) * PX_TO_PT,
-      y: (geometry.height - geometry.margin.top - (text.baseline - start)) * PX_TO_PT,
-      color: color.color,
-      opacity: color.opacity,
-    });
-    page.pushOperators(popGraphicsState());
+  let fontName = resources.fonts.get(face.font);
+  if (!fontName) {
+    fontName = page.node.newFontDictionary(face.font.name, face.font.ref);
+    resources.fonts.set(face.font, fontName);
   }
+  page.pushOperators(pushGraphicsState(), setFillingColor(color.color));
+  if (color.opacity !== 1) {
+    let opacity = resources.opacity.get(color.opacity);
+    if (!opacity) {
+      opacity = page.node.newExtGState(
+        'TextOpacity',
+        page.doc.context.obj({ Type: 'ExtGState', ca: color.opacity }),
+      );
+      resources.opacity.set(color.opacity, opacity);
+    }
+    page.pushOperators(setGraphicsState(opacity));
+  }
+  page.pushOperators(
+    beginText(),
+    setFontAndSize(fontName, text.fontSize * PX_TO_PT),
+    setTextRenderingMode(text.invisible ? TextRenderingMode.Invisible : TextRenderingMode.Fill),
+  );
+  const scale = (text.fontSize * PX_TO_PT) / face.positioned.unitsPerEm;
+  const baseline = (geometry.height - geometry.margin.top - (text.baseline - start)) * PX_TO_PT;
+  for (const run of text.runs) {
+    const x = (geometry.margin.left + run.x) * PX_TO_PT;
+    for (const glyph of face.positioned.shape(run.text, text.kerning ?? true)) {
+      page.pushOperators(
+        setTextMatrix(1, 0, 0, 1, x + glyph.x * scale, baseline + glyph.y * scale),
+        showText(glyph.encoded),
+      );
+    }
+  }
+  page.pushOperators(endText(), popGraphicsState());
 }
 
 /** Expand a raster placement to whole CSS pixels without shifting visible content. */
@@ -220,7 +253,12 @@ export async function writePDF(
       throwIfAborted(options.signal);
       // Cache coverage once per embedded face rather than rebuilding it for every line.
       const font = await pdf.embedFont(definition.bytes);
-      faces.push({ definition, font, characters: new Set(font.getCharacterSet()) });
+      faces.push({
+        definition,
+        font,
+        characters: new Set(font.getCharacterSet()),
+        positioned: new PositionedFont(font, definition.bytes),
+      });
     }
     // Validate every line before allocating any potentially expensive raster capture.
     for (const operation of snapshot.operations) {
@@ -276,6 +314,7 @@ export async function writePDF(
       throwIfAborted(options.signal);
       // Clip every primitive to the same source interval; tall backgrounds may span pages.
       const page = pdf.addPage([geometry.width * PX_TO_PT, geometry.height * PX_TO_PT]);
+      const textResources: TextResources = { fonts: new Map(), opacity: new Map() };
       page.pushOperators(
         pushGraphicsState(),
         rectangle(
@@ -294,7 +333,14 @@ export async function writePDF(
           continue;
         if (operation.kind === 'text') {
           if (!operation.invisible || options.includeRasterText !== false) {
-            drawLine(page, operation, matchingFont(operation, faces), slice.start, geometry);
+            drawLine(
+              page,
+              operation,
+              matchingFont(operation, faces),
+              slice.start,
+              geometry,
+              textResources,
+            );
           }
           continue;
         }
@@ -338,6 +384,10 @@ export async function writePDF(
       page.pushOperators(popGraphicsState());
     }
     throwIfAborted(options.signal);
+    for (const face of faces) {
+      await face.positioned.embedUnicode(pdf);
+      throwIfAborted(options.signal);
+    }
     // A fresh ArrayBuffer-backed copy is accepted by browser Blob definitions.
     const bytes = Uint8Array.from(await pdf.save());
     throwIfAborted(options.signal);

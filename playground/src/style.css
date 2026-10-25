@@ -1,0 +1,294 @@
+/* Shared UI colors stay outside the isolated document preview. */
+:root {
+  font-family: Inter, 'Segoe UI', Arial, sans-serif;
+  color: #18283d;
+  background: #f3f5f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 10px 15px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #86b2ff;
+  outline-offset: 3px;
+}
+
+button:disabled {
+  cursor: wait;
+  color: #6b778a;
+  background: #e8edf4;
+  border-color: #dbe2eb;
+}
+
+.app-shell {
+  max-width: 1460px;
+  margin: 0 auto;
+  padding: 38px 30px 20px;
+}
+
+.app-header {
+  margin-bottom: 32px;
+}
+
+.eyebrow,
+.step-label {
+  margin: 0 0 8px;
+  color: #466181;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+.introduction {
+  max-width: 700px;
+  margin: 0;
+  color: #536379;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+/* Preview ancestors must remain static, untransformed, and unclipped for DOM measurement. */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(340px, 1fr) minmax(796px, 1.75fr);
+  align-items: start;
+  gap: 28px;
+}
+
+.editor-panel {
+  min-width: 0;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #dce3ed;
+  border-radius: 14px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.025em;
+}
+
+.panel-heading .button-secondary {
+  min-height: 36px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field-help,
+.preview-help {
+  margin: 8px 0 14px;
+  color: #617087;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  resize: vertical;
+  border: 1px solid #cbd5e3;
+  border-radius: 8px;
+  padding: 14px;
+  color: #263c56;
+  background: #f9fbfe;
+  font-family: Consolas, 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  tab-size: 2;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.button-primary {
+  color: #fff;
+  background: #245fd5;
+  border-color: #245fd5;
+}
+
+.button-primary:hover:enabled {
+  background: #1b4eb5;
+}
+
+.button-secondary {
+  color: #29486d;
+  background: #fff;
+  border-color: #cbd6e5;
+}
+
+.button-secondary:hover:enabled {
+  background: #f0f5fc;
+}
+
+.status {
+  min-height: 21px;
+  margin: 15px 0 0;
+  color: #4d607b;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.warnings {
+  margin: 14px 0 0;
+  border: 1px solid #e8d6aa;
+  border-radius: 8px;
+  padding: 12px 16px 12px 30px;
+  color: #795521;
+  background: #fffbef;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.rendering-note {
+  margin-top: 22px;
+  border-top: 1px solid #e4e9f1;
+  padding-top: 18px;
+  color: #617087;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.rendering-note strong {
+  color: #344c6a;
+  font-size: 12px;
+}
+
+.rendering-note p {
+  margin: 6px 0 0;
+}
+
+.preview-panel {
+  min-width: 796px;
+}
+
+.preview-heading {
+  margin: 5px 0 10px;
+}
+
+.format-label {
+  border: 1px solid #d4dfea;
+  border-radius: 20px;
+  padding: 6px 11px;
+  color: #4c6381;
+  background: #eaf0f8;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.preview-paper {
+  width: 795.7px;
+  min-height: 500px;
+  border: 1px solid #dce3ed;
+  padding: 24px;
+  background: #fff;
+  box-shadow: 0 6px 22px #1d35550a;
+}
+
+/* Preserve the actual CSS pixel width instead of visually scaling the export source. */
+#preview-host {
+  width: 745.7px;
+  min-height: 450px;
+}
+
+.app-footer {
+  margin-top: 28px;
+  color: #7b8797;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1200px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 30px;
+  }
+
+  .editor-panel {
+    max-width: 796px;
+  }
+
+  textarea {
+    min-height: 300px;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-shell {
+    padding: 26px 16px 18px;
+  }
+
+  .app-header {
+    margin-bottom: 24px;
+  }
+
+  .editor-panel {
+    padding: 18px;
+  }
+
+  .introduction {
+    font-size: 14px;
+  }
+
+  .panel-heading {
+    gap: 10px;
+  }
+
+  .preview-heading,
+  .preview-help {
+    max-width: calc(100vw - 32px);
+  }
+}

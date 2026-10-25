@@ -39,6 +39,8 @@ export interface TextOperation {
   weight: number;
   /** Registered face style. */
   style: 'normal' | 'italic';
+  /** Disable OpenType kerning when the browser explicitly selects font-kerning: none. */
+  kerning?: boolean;
   /** Computed CSS rgb/rgba text color. */
   color: string;
   /** True for extraction-only text inside a raster subtree. */

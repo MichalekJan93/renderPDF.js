@@ -21,12 +21,12 @@ Development requires Node.js 22.18+ on the 22.x release line, 24.11+ on 24.x, or
 ```sh
 npm ci
 npm run build
-npm run dev
 ```
 
-Open [the demo](http://127.0.0.1:5173/) to try an export. The build creates an ESM
-entry at `dist/index.js`, TypeScript declarations and demos under `dist/demo/`.
+The build creates an ESM entry at `dist/index.js` and TypeScript declarations.
 Use a bundler to resolve the library's three runtime dependencies.
+To try HTML preview and PDF download, run the independent
+[playground](playground/README.md).
 
 The npm package is currently unpublished and marked `private` to prevent accidental
 publishing. The examples below use the local build.
@@ -145,9 +145,15 @@ unsupported CSS/elements, failed resources, source changes/overflow, pagination,
 raster and PDF writing failures. Warnings are available through both `onWarning`
 and the immutable `result.warnings` collection, without runtime console logging.
 
-PDF text uses browser word origins and approximate baseline/word-width fitting.
-Exact within-word kerning, arbitrary ligatures, complex shaping, bidi and variable
-font instances are not a fidelity promise. There is no arbitrary CSS/stacking
+PDF text uses browser word origins and fontkit's shaped glyph advances and offsets;
+glyph outlines retain their original proportions. Default OpenType ligatures,
+kerning (including `font-kerning: none`) and combining marks retain a selectable
+Unicode text layer. Baselines still use Canvas font metrics. Nondefault font
+features/variants, stretched faces, font-size adjustment, automatic hyphenation
+and soft hyphens fail explicitly. Keep shaped words in one text node; cross-inline
+ligatures and zero-width text fragments are unsupported and reject explicitly.
+Exact output across shaping engines, arbitrary ligatures, complex scripts, bidi
+and variable font instances are not a fidelity promise. There is no arbitrary CSS/stacking
 engine, collapsed table borders, repeated table headers or header/footer engine.
 Pagination is a measured source-to-page mapping, not full CSS Paged Media: parity
 breaks (`left/right/recto/verso`), column breaks, inline/cell break directives,
@@ -161,32 +167,53 @@ ordered paint list cannot reproduce the browser's block/inline paint phases.
 
 ## Development
 
-Source code lives in `src/`. The demos and measurement helpers in `experiments/`
-use the same rendering pipeline as the public API and are included in browser
-regression tests.
+Source code lives in `src/`. Browser regression pages live in `tests/fixtures/`;
+their measurement helpers in `experiments/` use the same rendering pipeline as
+the public API. `npm run dev` serves these fixtures for development, while
+`npm run build` builds only the library.
+
+The independent HTML editor in `playground/` installs the
+packed library as an npm dependency. It provides a live preview and PDF download
+without importing renderer source files.
 
 Vite+ provides the development server, builds, Oxlint, Oxfmt and Vitest. Shared
 lint, format and unit-test settings live in `vite.config.ts`; the library build
 uses `vite.library.config.ts` and TypeScript to generate declarations. The toolchain
 is installed locally by `npm ci`; a global Vite+ installation is optional.
 
-- `/` demonstrates selectable text, local raster regions and page mapping.
-- `/hybrid.html` demonstrates automatic local effects, custom paper, CSS breaks,
-  an avoid card and a rowspan table with a PDF download.
-- `/document.html` provides a local HTML chooser and PDF download.
-
-The local document preview deliberately uses one explicitly stated font family;
+The playground deliberately uses one explicitly stated font family;
 the reusable API supports multiple families. Private documents and local system
-font programs belong only in ignored `artifacts/` and are optional for the demos.
+font programs belong only in ignored `artifacts/`; regression tests use synthetic
+documents and do not require them.
 
 Run `npm run check` before submitting a change. It checks types, lint, unit tests,
-browser tests, builds and formatting. Browser tests require an installed Google
+browser tests, builds, formatting and package contents. Browser tests require an installed Google
 Chrome and use synthetic fixtures, Playwright and PDF.js; those tools never run in
 conversion code. Generated PDFs, screenshots and reports stay outside versioned
 source files.
 
+Typography regressions compare tight browser/PDF text crops for Noto Sans regular,
+bold and italic plus Noto Serif, including Czech accents, ligatures, kerning and
+wrapped mixed-font lines on multiple pages. The [benchmark guide](BENCHMARKS.md)
+describes repeatable exports of small, medium, large and hybrid documents.
+Run `npm run benchmark` to record timings separately from correctness checks.
+GitHub Actions runs the checks and preserves rendered comparisons and timing reports.
+
+### Local package
+
+`npm pack --pack-destination artifacts` builds the library and checks its contents
+before creating a local archive. Create the `artifacts/` directory first if it is
+absent. The package includes the ESM entry, TypeScript declarations, package metadata,
+README, MIT license and README logo. Demos, test fonts, source files and local
+documents are excluded by an explicit `files` allowlist.
+
+`npm run check:package` checks the current build through npm's dry-run inventory;
+run `npm run build:library` first when no build exists. The check rejects missing
+entry points, empty files and unexpected contents. Packaging does not publish the
+library; `private: true` remains enabled.
+
 ## License
 
-RenderPDF.js is licensed under the [MIT License](LICENSE). Bundled Noto Sans test
-fonts retain their [SIL Open Font License](public/fonts/OFL.txt); they are not
+RenderPDF.js is licensed under the [MIT License](LICENSE). Bundled Noto Sans and Noto Serif test
+fonts retain their [SIL Open Font License](public/fonts/README.md); they are not
 bundled into the library entry. Third-party dependencies retain their own licenses.

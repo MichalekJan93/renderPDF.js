@@ -2,7 +2,7 @@ import type { RenderPDFOptions, RenderPDFResult } from './api-types.js';
 import { RenderPDFError, throwIfAborted, type RenderWarning } from './diagnostics.js';
 import { collectPageBreaks } from './breaks.js';
 import { validateRegisteredFonts } from './fonts.js';
-import { snapshotLayout } from './layout.js';
+import { measurePreparedLayout } from './layout.js';
 import { resolvePage } from './page.js';
 import { paginate } from './pagination.js';
 import { writePDF } from './pdf.js';
@@ -29,9 +29,11 @@ export async function renderDocument(
   const source = prepareSource(element, signal);
   try {
     await source.ready();
-    // Browser layout owns wrapping, Flexbox, Grid and table geometry.
-    const snapshot = await withCancellation(snapshotLayout(element, fonts, { fallback }), signal);
+    // Reject edits queued after readiness before beginning synchronous browser measurement.
     source.assertUnchanged();
+    // No await separates geometry measurement from its baseline; a second full style scan is redundant.
+    const snapshot = measurePreparedLayout(element, fonts, { fallback });
+    source.captureBaseline();
     if (snapshot.width > page.width - page.margin.left - page.margin.right) {
       throw new RenderPDFError(
         'SOURCE_OVERFLOW',

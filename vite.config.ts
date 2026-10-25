@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite-plus';
-import { fileURLToPath } from 'node:url';
 
-/** Share static checks and unit tests while keeping development demos on loopback. */
+/** Share static checks and unit tests while serving browser fixtures on loopback. */
 export default defineConfig({
   // Preserve the previous recommended JavaScript/TypeScript rules and their error severity.
   lint: {
@@ -17,6 +16,7 @@ export default defineConfig({
       'node_modules/**',
       'artifacts/**',
       'docs/**',
+      'playground/**',
       'test-results/**',
       'playwright-report/**',
     ],
@@ -156,19 +156,10 @@ export default defineConfig({
       'package-lock.json',
       'public/fonts',
       'docs',
+      'playground',
     ],
   },
   // Full browser/PDF comparisons remain in the separate Playwright suite.
   test: { include: ['tests/**/*.test.ts'] },
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
-  build: {
-    outDir: 'dist/demo',
-    rolldownOptions: {
-      input: {
-        demo: fileURLToPath(new URL('./index.html', import.meta.url)),
-        document: fileURLToPath(new URL('./document.html', import.meta.url)),
-        hybrid: fileURLToPath(new URL('./hybrid.html', import.meta.url)),
-      },
-    },
-  },
 });

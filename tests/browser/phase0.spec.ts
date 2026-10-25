@@ -103,7 +103,7 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
   test.setTimeout(120_000);
   // All export work must stay local; only the fixture's initial assets may use HTTP.
   const exportRequests: string[] = [];
-  await page.goto('/');
+  await page.goto('/tests/fixtures/rendering.html');
   await page.waitForFunction(() => Boolean((window as unknown as { phase0?: ProbeApi }).phase0));
   await page.evaluate(() => document.fonts.ready);
   // Source DOM remains the user's UI; an export cannot alter it.
@@ -460,7 +460,7 @@ test('unsupported CSS, unavailable faces and invalid raster sizes fail explicitl
 }) => {
   // The negative resource probe must never contact a real network endpoint.
   await page.route('https://example.invalid/**', (route) => route.abort());
-  await page.goto('/');
+  await page.goto('/tests/fixtures/rendering.html');
   await page.waitForFunction(() => Boolean((window as unknown as { phase0?: ProbeApi }).phase0));
   // Capability failures are checked using real connected browser elements.
   const errors = await page.evaluate(async () => {
@@ -545,7 +545,7 @@ test('the demo downloads a PDF Blob without a print dialog or browser errors', a
     dialogs.push(dialog.message());
     await dialog.dismiss();
   });
-  await page.goto('/');
+  await page.goto('/tests/fixtures/rendering.html');
   // Wait for exact font registration before invoking the actual download button.
   const button = page.getByRole('button', { name: 'Stáhnout experiment PDF' });
   await expect(button).toBeEnabled();

@@ -500,7 +500,7 @@ test('the hybrid demo downloads a complete mixed PDF through its actual button',
   // Capture uncaught browser errors throughout font setup and the actual asynchronous UI flow.
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
-  await page.goto('/hybrid.html');
+  await page.goto('/tests/fixtures/hybrid.html');
   // The demo enables its action only after exact browser/PDF font registration is complete.
   const button = page.locator('#hybrid-export');
   await expect(button).toBeEnabled();

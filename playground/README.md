@@ -2,7 +2,7 @@
 
 A small, independent Vite+ application for checking the packaged library. Paste static HTML, update its live preview, and download a PDF. Conversion runs in the browser; the document is not uploaded.
 
-The application imports `renderpdf-js` from the local npm archive through `file:../artifacts/renderpdf-js-0.0.0.tgz`. It never imports the library's source directory.
+The application imports `renderpdf-js` from the local npm archive through `file:../artifacts/renderpdf-js-0.1.0.tgz`. It never imports the library's source directory.
 
 ## Run locally
 
@@ -12,22 +12,25 @@ From the repository root, create `artifacts/` if it does not exist, then run:
 npm ci
 npm pack --pack-destination artifacts
 cd playground
-npm ci
+npm uninstall renderpdf-js
+npm install ../artifacts/renderpdf-js-0.1.0.tgz
 npm run dev
 ```
 
 Open the URL printed by Vite. Paste an HTML document or fragment into **HTML dokument**, select **Aktualizovat náhled**, then **Stáhnout PDF**. **Načíst ukázku** restores the synthetic example.
 
-After changing the library, pack it again from the repository root and reinstall the archive in this application before testing. Restart the dev server to load the refreshed dependency:
+Reinstalling the archive refreshes the lockfile integrity for the current local build, which can differ from the committed build even at the same package version. After changing the library, pack it again from the repository root and reinstall the archive in this application before testing. Restart the dev server to load the refreshed dependency:
 
 ```sh
 # Repository root
 npm pack --pack-destination artifacts
 cd playground
 npm uninstall renderpdf-js
-npm install ../artifacts/renderpdf-js-0.0.0.tgz
+npm install ../artifacts/renderpdf-js-0.1.0.tgz
 npm run dev
 ```
+
+When the library version changes, use the corresponding archive filename printed by `npm pack`.
 
 ## Checks
 

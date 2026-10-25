@@ -1,9 +1,27 @@
 {
   "name": "renderpdf-js",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Browser-only HTML to PDF renderer with explicit fonts and local raster regions",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichalekJan93/renderPDF.js.git"
+  },
+  "homepage": "https://github.com/MichalekJan93/renderPDF.js#readme",
+  "bugs": {
+    "url": "https://github.com/MichalekJan93/renderPDF.js/issues"
+  },
+  "keywords": [
+    "pdf",
+    "html",
+    "browser",
+    "typescript",
+    "html-to-pdf"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "exports": {
     ".": {

@@ -36,8 +36,9 @@ jobs:
       - name: Verify the packed playground consumer
         working-directory: playground
         run: |
+          package_version=$(node -p "require('../package.json').version")
           npm uninstall renderpdf-js
-          npm install ../artifacts/renderpdf-js-0.0.0.tgz
+          npm install "../artifacts/renderpdf-js-${package_version}.tgz"
           npm run check
       - name: Reproducible export samples
         run: npm run benchmark

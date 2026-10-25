@@ -41,6 +41,7 @@ text and local raster correctness are checked by `npm run test:browser`.
 The GitHub workflow runs static checks, unit tests, browser verification, the
 library build, package-content validation and these benchmarks. It also packs the
 verified build and checks the independent playground against that archive. The
-consumer dependency is reinstalled on the disposable runner because the local
-`0.0.0` archive's integrity changes with the build. It retains test and timing
+consumer dependency is reinstalled on the disposable runner because a local
+archive's integrity can change between builds at the same package version. The
+workflow derives the archive filename from the library's current version. It retains test and timing
 artifacts for inspecting failures and comparing runs. It does not publish a package.

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/renderpdf-logo.png" alt="RenderPDF.js logo" width="560" />
+  <img src="https://raw.githubusercontent.com/MichalekJan93/renderPDF.js/main/assets/renderpdf-logo.png" alt="RenderPDF.js logo" width="560" />
 </p>
 
 # RenderPDF.js
@@ -15,28 +15,23 @@ established.
 
 ## Getting started
 
-Development requires Node.js 22.18+ on the 22.x release line, 24.11+ on 24.x, or
-26+. The `.node-version` file records the verified 22.22.0 runtime. From a local checkout:
+Install the library in a browser application with a bundler, such as Vite:
 
 ```sh
-npm ci
-npm run build
+npm install renderpdf-js
 ```
 
-The build creates an ESM entry at `dist/index.js` and TypeScript declarations.
-Use a bundler to resolve the library's three runtime dependencies.
-To try HTML preview and PDF download, run the independent
-[playground](playground/README.md).
-
-The npm package is currently unpublished and marked `private` to prevent accidental
-publishing. The examples below use the local build.
+The package provides an ESM entry and TypeScript declarations. Version 0.1.x is
+experimental; review the supported scope and limits before using it for documents.
+To try HTML preview and PDF download from a source checkout, run the independent
+[playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playground).
 
 ## Usage
 
-Use this import in an application entry beside the generated `dist/` directory.
+Import the public API from the installed package in your application's browser entry:
 
 ```ts
-import { registerFont, renderPDF, RenderPDFError } from './dist/index.js';
+import { registerFont, renderPDF, RenderPDFError } from 'renderpdf-js';
 
 // Fetch a licensed static TTF/OTF program owned by the application.
 const response = await fetch('/fonts/MyFont-Regular.ttf');
@@ -167,6 +162,14 @@ ordered paint list cannot reproduce the browser's block/inline paint phases.
 
 ## Development
 
+Development requires Node.js 22.18+ on the 22.x release line, 24.11+ on 24.x, or
+26+. The `.node-version` file records the verified 22.22.0 runtime. From a source checkout:
+
+```sh
+npm ci
+npm run build
+```
+
 Source code lives in `src/`. Browser regression pages live in `tests/fixtures/`;
 their measurement helpers in `experiments/` use the same rendering pipeline as
 the public API. `npm run dev` serves these fixtures for development, while
@@ -194,7 +197,7 @@ source files.
 
 Typography regressions compare tight browser/PDF text crops for Noto Sans regular,
 bold and italic plus Noto Serif, including Czech accents, ligatures, kerning and
-wrapped mixed-font lines on multiple pages. The [benchmark guide](BENCHMARKS.md)
+wrapped mixed-font lines on multiple pages. The [benchmark guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/BENCHMARKS.md)
 describes repeatable exports of small, medium, large and hybrid documents.
 Run `npm run benchmark` to record timings separately from correctness checks.
 GitHub Actions runs the checks and preserves rendered comparisons and timing reports.
@@ -210,10 +213,12 @@ documents are excluded by an explicit `files` allowlist.
 `npm run check:package` checks the current build through npm's dry-run inventory;
 run `npm run build:library` first when no build exists. The check rejects missing
 entry points, empty files and unexpected contents. Packaging does not publish the
-library; `private: true` remains enabled.
+library. Maintainers publish a reviewed archive with
+`npm publish ./artifacts/renderpdf-js-<version>.tgz --access public` after updating
+the package version and verifying the packed consumer.
 
 ## License
 
 RenderPDF.js is licensed under the [MIT License](LICENSE). Bundled Noto Sans and Noto Serif test
-fonts retain their [SIL Open Font License](public/fonts/README.md); they are not
+fonts retain their [SIL Open Font License](https://github.com/MichalekJan93/renderPDF.js/blob/main/public/fonts/README.md); they are not
 bundled into the library entry. Third-party dependencies retain their own licenses.

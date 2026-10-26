@@ -90,6 +90,30 @@ export class PositionedFont {
     return positioned;
   }
 
+  /** Measure shaped advance and ink extents so repeated page text cannot overflow its band.
+   * @param text Complete single line using this exact embedded font.
+   */
+  measure(text: string): { left: number; right: number; ascent: number; descent: number } {
+    const run = this.program.layout(text);
+    let x = 0;
+    let y = 0;
+    let left = 0;
+    let right = 0;
+    let ascent = this.program.ascent;
+    let descent = -this.program.descent;
+    for (let index = 0; index < run.glyphs.length; index += 1) {
+      const glyph = run.glyphs[index]!;
+      const position = run.positions[index]!;
+      left = Math.min(left, x + position.xOffset + glyph.bbox.minX);
+      right = Math.max(right, x + position.xOffset + glyph.bbox.maxX);
+      ascent = Math.max(ascent, y + position.yOffset + glyph.bbox.maxY);
+      descent = Math.max(descent, -(y + position.yOffset + glyph.bbox.minY));
+      x += position.xAdvance;
+      y += position.yAdvance;
+    }
+    return { left, right: Math.max(right, x), ascent, descent };
+  }
+
   /** Preserve extraction for every used shaped glyph, including uncoded ligatures.
    * @param document Export document owning the public font reference and object context.
    */

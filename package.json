@@ -1,7 +1,7 @@
 {
   "name": "renderpdf-js",
-  "version": "0.1.0",
-  "description": "Browser-only HTML to PDF renderer with explicit fonts and local raster regions",
+  "version": "0.2.0",
+  "description": "Browser-side HTML and image to PDF renderer with explicit fonts, local rasters and multipage TIFF",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,7 +16,9 @@
     "html",
     "browser",
     "typescript",
-    "html-to-pdf"
+    "html-to-pdf",
+    "image-to-pdf",
+    "tiff-to-pdf"
   ],
   "publishConfig": {
     "access": "public",
@@ -59,7 +61,8 @@
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
     "html-to-image": "^1.11.13",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "utif2": "4.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

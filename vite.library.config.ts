@@ -12,7 +12,7 @@ export default defineConfig({
       fileName: 'index',
     },
     rolldownOptions: {
-      external: ['pdf-lib', '@pdf-lib/fontkit', 'html-to-image'],
+      external: ['pdf-lib', '@pdf-lib/fontkit', 'html-to-image', 'utif2'],
     },
   },
 });

@@ -1,13 +1,13 @@
-import type { PageGeometry, RenderPDFOptions } from './api-types.js';
+import type { PageGeometry, PDFPageOptions, RenderPDFOptions } from './api-types.js';
 import { RenderPDFError } from './diagnostics.js';
 
-/** Resolve physical paper dimensions and validate the small public option surface. */
-export function resolvePage(
+/** Resolve physical paper dimensions without requiring DOM content or registered fonts. */
+export function resolvePageGeometry(
   /** Caller-owned options; resolving them never changes their values. */
-  options: RenderPDFOptions,
+  options: PDFPageOptions,
 ): PageGeometry {
-  if (!options || !Array.isArray(options.fonts) || options.fonts.length === 0) {
-    throw new RenderPDFError('INVALID_OPTIONS', 'Provide at least one explicitly registered font.');
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'PDF page options must be an object.');
   }
   // Standard portrait dimensions in PDF points; the internal pipeline uses CSS pixels.
   const formats = { A4: [595.28, 841.89], A3: [841.89, 1190.55], Letter: [612, 792] } as const;
@@ -53,6 +53,18 @@ export function resolvePage(
   if (edges.left + edges.right >= width || edges.top + edges.bottom >= height) {
     throw new RenderPDFError('INVALID_OPTIONS', 'Page margins leave no positive content area.');
   }
+  return { width, height, margin: edges };
+}
+
+/** Validate HTML rendering settings around the shared physical page geometry. */
+export function resolvePage(
+  /** Caller-owned HTML rendering options. */
+  options: RenderPDFOptions,
+): PageGeometry {
+  if (!options || !Array.isArray(options.fonts) || options.fonts.length === 0) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'Provide at least one explicitly registered font.');
+  }
+  const geometry = resolvePageGeometry(options);
   if (
     options.rasterScale !== undefined &&
     (!Number.isFinite(options.rasterScale) || options.rasterScale <= 0)
@@ -62,14 +74,20 @@ export function resolvePage(
   if (options.onWarning !== undefined && typeof options.onWarning !== 'function') {
     throw new RenderPDFError('INVALID_OPTIONS', 'onWarning must be a function.');
   }
+  if (options.onProgress !== undefined && typeof options.onProgress !== 'function') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'onProgress must be a function.');
+  }
   if (options.fallback !== undefined && !['auto', 'strict'].includes(options.fallback)) {
     throw new RenderPDFError('INVALID_OPTIONS', 'fallback must be auto or strict.');
   }
   if (options.pageBreak !== undefined && !['auto', 'css'].includes(options.pageBreak)) {
     throw new RenderPDFError('INVALID_OPTIONS', 'pageBreak must be auto or css.');
   }
+  if (options.repeatTableHeaders !== undefined && typeof options.repeatTableHeaders !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'repeatTableHeaders must be a boolean.');
+  }
   if (options.signal !== undefined && !(options.signal instanceof AbortSignal)) {
     throw new RenderPDFError('INVALID_OPTIONS', 'signal must be an AbortSignal.');
   }
-  return { width, height, margin: edges };
+  return geometry;
 }

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic repeated table headers and page bands</title>
+    <style>
+      /* Fixed source geometry makes column placement and page boundaries observable. */
+      body {
+        margin: 0;
+      }
+      #statement {
+        display: flow-root;
+        width: 460px;
+        color: #163049;
+        background: white;
+        font: 14px/20px 'Statement Sans';
+      }
+      p {
+        margin: 0;
+      }
+      table {
+        width: 460px;
+        table-layout: fixed;
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+      th,
+      td {
+        box-sizing: border-box;
+        height: 32px;
+        padding: 5px 8px;
+        border: 1px solid #8299af;
+        font-weight: 400;
+        text-align: left;
+      }
+      th {
+        background: #e1ebf5;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The browser test creates fictional rows; no personal document is used. -->
+    <main id="statement">
+      <table>
+        <thead>
+          <tr>
+            <th>TABHEAD</th>
+            <th>Kontrola</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </main>
+  </body>
+</html>

@@ -1,7 +1,20 @@
 import { RenderPDFError, type RenderWarning } from './diagnostics.js';
 import { assertAutomaticRasterBoundary, automaticRasterReason } from './planner.js';
+import {
+  collapsedTableOwner,
+  measureCollapsedTableBorders,
+  validateCollapsedTablePart,
+} from './table-borders.js';
+import type { CollapsedTablePaint } from './table-borders.js';
 import type { RegisteredFont } from './api-types.js';
-import type { Bounds, LayoutSnapshot, PaintOperation, TextOperation } from './types.js';
+import type {
+  Bounds,
+  BoxOperation,
+  LayoutSnapshot,
+  PaintOperation,
+  TableHeader,
+  TextOperation,
+} from './types.js';
 
 /** Grapheme boundaries are locale independent for the supported Latin text. */
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
@@ -52,6 +65,7 @@ function validateVectorStyle(
   element: HTMLElement,
   style: CSSStyleDeclaration,
   allowLocalRasterEffects = false,
+  collapsed = false,
 ): void {
   // Chromium clips replaced image content to its own box by default; fill embedding matches it.
   const replacedImage = element instanceof HTMLImageElement;
@@ -109,10 +123,13 @@ function validateVectorStyle(
       `Unsupported CSS on ${element.tagName}: ${unsupported.join(', ')}. Use a bounded data-raster subtree when safe.`,
     );
   }
-  if (element instanceof HTMLTableElement && style.borderCollapse !== 'separate') {
+  if (
+    element instanceof HTMLTableElement &&
+    !['separate', 'collapse'].includes(style.borderCollapse)
+  ) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
-      'Native table snapshots require separate borders; collapsed borders are unsupported.',
+      'Native table snapshots require separate or collapsed borders.',
     );
   }
   if (
@@ -132,11 +149,13 @@ function validateVectorStyle(
   const colors = sides.map((side) => style[`border${side}Color`]);
   // Border styles other than solid cannot be approximated by one rectangle.
   const styles = sides.map((side) => style[`border${side}Style`]);
+  if (collapsed) validateCollapsedTablePart(element, style);
   if (
-    widths.some((width) => width !== widths[0]) ||
-    (widths[0] !== '0px' &&
-      (colors.some((color) => color !== colors[0]) ||
-        styles.some((borderStyle) => borderStyle !== 'solid')))
+    !collapsed &&
+    (widths.some((width) => width !== widths[0]) ||
+      (widths[0] !== '0px' &&
+        (colors.some((color) => color !== colors[0]) ||
+          styles.some((borderStyle) => borderStyle !== 'solid'))))
   ) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
@@ -385,9 +404,13 @@ function validateLayoutSource(
   root: HTMLElement,
   fonts: readonly RegisteredFont[],
   fallback: 'auto' | 'strict',
+  repeatTableHeaders = false,
 ): void {
   if (fallback !== 'auto' && fallback !== 'strict') {
     throw new RenderPDFError('INVALID_OPTIONS', 'Raster fallback must be auto or strict.');
+  }
+  if (typeof repeatTableHeaders !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'Table header repetition must be a boolean.');
   }
   if (
     !(root instanceof HTMLElement) ||
@@ -432,6 +455,129 @@ function validateLayoutSource(
   }
 }
 
+/** Collect replayable native headers while keeping the browser's original column geometry.
+ * @param root Entire connected source whose measured operations retain DOM paint order.
+ * @param origin Source rectangle shared by all original paint coordinates.
+ * @param operations Complete original display list; repeated lists keep these exact references.
+ * @param headerPaint Descendant operations recorded during each visible THEAD traversal.
+ * @param elementBoxes Native ancestor backgrounds needed underneath transparent header cells.
+ */
+function measureTableHeaders(
+  root: HTMLElement,
+  origin: DOMRect,
+  operations: PaintOperation[],
+  headerPaint: Map<HTMLTableSectionElement, PaintOperation[]>,
+  elementBoxes: Map<HTMLElement, BoxOperation>,
+  collapsedTables: Map<HTMLTableElement, CollapsedTablePaint>,
+): TableHeader[] {
+  // Root tables participate just like tables nested in an ordinary document wrapper.
+  const tables = Array.from(root.querySelectorAll('table'));
+  if (root instanceof HTMLTableElement) tables.unshift(root);
+  // One page reserves one full-width header band; concurrent tables cannot share that contract.
+  const headers: TableHeader[] = [];
+  for (const table of tables) {
+    // Tables without a visible original header or body do not need a continuation header.
+    const head = table.tHead;
+    if (!head || getComputedStyle(head).display === 'none') continue;
+    const collapsed = collapsedTables.get(table);
+    const bounds = collapsed?.headerBounds ?? relativeBounds(head.getBoundingClientRect(), origin);
+    if (bounds.width <= 0 || bounds.height <= 0) continue;
+    const bodyRows = Array.from(table.tBodies).flatMap((body) =>
+      Array.from(body.rows).filter((row) => row.getBoundingClientRect().height > 0),
+    );
+    if (bodyRows.length === 0) continue;
+    if (collapsed && !collapsed.repeatSafe) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Repeated collapsed headers require matching horizontal border winners at the header/body boundary and all body row boundaries.',
+      );
+    }
+    if (
+      table.parentElement?.closest('table') ||
+      table.querySelector('table') ||
+      Array.from(table.children).filter((child) => child.tagName === 'THEAD').length !== 1 ||
+      getComputedStyle(table).display !== 'table' ||
+      getComputedStyle(head).display !== 'table-header-group'
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_ELEMENT',
+        'Repeated headers require a standalone native table with one THEAD and no nested tables.',
+      );
+    }
+    // Header rowspans and raster captures do not have an independently replayable native band.
+    if (
+      Array.from(head.rows).some((row) =>
+        Array.from(row.cells).some((cell) => cell.rowSpan !== 1),
+      ) ||
+      operations.some(
+        (operation) =>
+          operation.kind === 'raster' &&
+          (operation.element.contains(head) || head.contains(operation.element)),
+      )
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_ELEMENT',
+        'Repeated table headers do not support header rowspans or rasterized headers and ancestors.',
+      );
+    }
+    // Include the browser's inter-group border spacing in every repeated header's reserved height.
+    const bodyStart = relativeBounds(bodyRows[0]!.getBoundingClientRect(), origin).y;
+    const lastRow = relativeBounds(bodyRows.at(-1)!.getBoundingClientRect(), origin);
+    const bodyEnd = lastRow.y + lastRow.height;
+    const painted = headerPaint.get(head);
+    if (
+      !painted ||
+      bodyStart < bounds.y + bounds.height - 0.1 ||
+      bodyEnd <= bodyStart ||
+      painted.some(
+        (operation) =>
+          operation.kind !== 'border' &&
+          (operation.bounds.y < bounds.y - 0.1 ||
+            // Continuations may reuse the source row gap, so every repeated glyph must fit THEAD itself.
+            operation.bounds.y + operation.bounds.height > bounds.y + bounds.height + 0.1 ||
+            operation.bounds.x < bounds.x - 0.1 ||
+            operation.bounds.x + operation.bounds.width > bounds.x + bounds.width + 0.1),
+      ) ||
+      bodyRows.some((row) =>
+        Array.from(row.cells).some((cell) => {
+          // Existing body-only rowspans stay atomic; crossing a repeated section edge is unsafe.
+          const cellBounds = relativeBounds(cell.getBoundingClientRect(), origin);
+          return cellBounds.y < bodyStart - 0.1 || cellBounds.y + cellBounds.height > bodyEnd + 0.1;
+        }),
+      )
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Repeated table headers require a separate, ordered header band without overflowing paint or cells spanning header/body boundaries.',
+      );
+    }
+    if (
+      headers.some(
+        (header) => Math.min(header.bodyEnd, bodyEnd) - Math.max(header.bounds.y, bounds.y) > 0.01,
+      )
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Repeated headers do not support tables whose vertical continuation intervals overlap.',
+      );
+    }
+    // Replay ancestor boxes in their original order, clipped by the writer to this header band.
+    const included = new Set<PaintOperation>(painted);
+    for (let ancestor = head.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const box = elementBoxes.get(ancestor);
+      if (box) included.add(box);
+      if (ancestor === root) break;
+    }
+    headers.push({
+      bounds,
+      bodyStart,
+      bodyEnd,
+      operations: operations.filter((operation) => included.has(operation)),
+    });
+  }
+  return headers;
+}
+
 /** Prepare browser resources, then snapshot the supported static DOM subset without changing it.
  * @param root Connected, visible HTMLElement whose existing browser layout is exported.
  * @param fonts Explicit faces used both by the browser and PDF embedding.
@@ -443,11 +589,14 @@ export async function snapshotLayout(
   options: {
     /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
     fallback?: 'auto' | 'strict';
+    /** Reserve and replay a native THEAD on each body continuation page. */
+    repeatTableHeaders?: boolean;
   } = {},
 ): Promise<LayoutSnapshot> {
   // Capture the caller's policy before yielding, and reject invalid input before waiting on resources.
   const fallback = options.fallback ?? 'auto';
-  validateLayoutSource(root, fonts, fallback);
+  const repeatTableHeaders = options.repeatTableHeaders ?? false;
+  validateLayoutSource(root, fonts, fallback, repeatTableHeaders);
   await document.fonts.ready;
   // Image decoding completes before any geometry is measured.
   const images = Array.from(root.querySelectorAll('img'));
@@ -463,7 +612,7 @@ export async function snapshotLayout(
       }
     }),
   );
-  return measurePreparedLayout(root, fonts, { fallback });
+  return measurePreparedLayout(root, fonts, { fallback, repeatTableHeaders });
 }
 
 /** Measure settled browser resources synchronously so a source guard can share the same task.
@@ -477,11 +626,14 @@ export function measurePreparedLayout(
   options: {
     /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
     fallback?: 'auto' | 'strict';
+    /** Reserve and replay a native THEAD on each body continuation page. */
+    repeatTableHeaders?: boolean;
   } = {},
 ): LayoutSnapshot {
   // Capture the policy once; this path deliberately performs no asynchronous resource preparation.
   const fallback = options.fallback ?? 'auto';
-  validateLayoutSource(root, fonts, fallback);
+  const repeatTableHeaders = options.repeatTableHeaders ?? false;
+  validateLayoutSource(root, fonts, fallback, repeatTableHeaders);
   // One origin is shared by vector text, image bounds, and raster regions.
   const origin = root.getBoundingClientRect();
   if (origin.width <= 0 || origin.height <= 0)
@@ -497,8 +649,15 @@ export function measurePreparedLayout(
   const cache: TextMetricsCache = { context: contextCandidate, fonts: new Map() };
   // The list's order is the paint order for this deliberately restricted static subset.
   const operations: PaintOperation[] = [];
+  // Record native ownership only when the caller explicitly requests repeated table headers.
+  const headerPaint = new Map<HTMLTableSectionElement, PaintOperation[]>();
+  const elementBoxes = new Map<HTMLElement, BoxOperation>();
+  // A collapsed grid paints one resolved border layer after every cell's background and text.
+  const collapsedTables = new Map<HTMLTableElement, CollapsedTablePaint>();
   // Browser rows and rowspan cells are indivisible intervals for the existing page mapper.
   const atomicBounds: Bounds[] = [];
+  // Outer collapsed half-strokes extend only their first and last row's atomic interval.
+  const tableRows = new Map<HTMLTableRowElement, Bounds>();
   // Approximate baseline and shaping behavior must remain visible to experiment users.
   const warnings: RenderWarning[] = [
     {
@@ -514,9 +673,12 @@ export function measurePreparedLayout(
    * @param insideAutomatic Whether automatic capture must retain the stricter native safety guards.
    */
   function visit(element: HTMLElement, insideRaster: boolean, insideAutomatic = false): void {
+    // A header's own box and descendants form one contiguous section of the original paint list.
+    const operationStart = operations.length;
     // Display-none descendants have no paint or extraction contribution.
     const style = getComputedStyle(element);
     if (style.display === 'none') return;
+    const collapsed = collapsedTableOwner(element, style);
     if (style.visibility !== 'visible') {
       if (!insideRaster || insideAutomatic)
         throw new RenderPDFError(
@@ -581,7 +743,7 @@ export function measurePreparedLayout(
     const automatic = insideAutomatic || automaticReason !== undefined;
     if (automatic) {
       if (insideAutomatic) automaticRasterReason(style);
-      validateVectorStyle(element, style, true);
+      validateVectorStyle(element, style, true, collapsed !== undefined);
       validateDisplay(element, style);
     }
     if (
@@ -617,6 +779,12 @@ export function measurePreparedLayout(
     }
     // One chosen boundary owns all visible descendants exactly once, regardless of nested markers.
     const raster = explicitRaster || automaticReason !== undefined;
+    if (raster && collapsed && !(element instanceof HTMLTableElement)) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Collapsed table cells and internal groups cannot be independently rasterized.',
+      );
+    }
     if (raster) {
       if (
         style.position !== 'static' ||
@@ -648,13 +816,15 @@ export function measurePreparedLayout(
         return;
       }
     } else if (!insideRaster) {
-      validateVectorStyle(element, style);
+      validateVectorStyle(element, style, false, collapsed !== undefined);
       validateDisplay(element, style);
       if (
         element instanceof HTMLTableRowElement ||
         (element instanceof HTMLTableCellElement && element.rowSpan !== 1)
       ) {
-        atomicBounds.push(bounds);
+        const atomic = { ...bounds };
+        atomicBounds.push(atomic);
+        if (element instanceof HTMLTableRowElement) tableRows.set(element, atomic);
       }
       if (element instanceof HTMLImageElement) {
         if (style.objectFit !== 'fill' || style.borderTopWidth !== '0px')
@@ -680,13 +850,15 @@ export function measurePreparedLayout(
         }
         operations.push({ kind: 'image', bounds, element });
       } else if (!['BR', 'COL', 'COLGROUP'].includes(element.tagName)) {
-        operations.push({
+        const box: BoxOperation = {
           kind: 'box',
           bounds,
           background: style.backgroundColor,
           borderColor: style.borderTopColor,
-          borderWidth: Number.parseFloat(style.borderTopWidth),
-        });
+          borderWidth: collapsed ? 0 : Number.parseFloat(style.borderTopWidth),
+        };
+        operations.push(box);
+        if (repeatTableHeaders) elementBoxes.set(element, box);
       }
     }
     // Raster descendants retain semantic text without emitting duplicate visible boxes or images.
@@ -697,6 +869,7 @@ export function measurePreparedLayout(
         .filter(
           (child): child is HTMLElement =>
             child instanceof HTMLElement &&
+            !(collapsed && ['COL', 'COLGROUP'].includes(child.tagName)) &&
             getComputedStyle(child).display !== 'none' &&
             getComputedStyle(child).visibility !== 'hidden',
         )
@@ -740,6 +913,45 @@ export function measurePreparedLayout(
             'UNSUPPORTED_ELEMENT',
             `Cannot snapshot ${child.tagName}; use a raster subtree.`,
           );
+      }
+    }
+    if (
+      repeatTableHeaders &&
+      element instanceof HTMLTableSectionElement &&
+      element.tagName === 'THEAD'
+    ) {
+      headerPaint.set(element, operations.slice(operationStart));
+    }
+    if (!invisible && element instanceof HTMLTableElement && collapsed) {
+      const paint = measureCollapsedTableBorders(element, origin);
+      collapsedTables.set(element, paint);
+      // Avoid the JavaScript argument-count limit when a long table creates many border segments.
+      for (const operation of paint.operations) operations.push(operation);
+      // Include the table's outer half-borders in the neighboring row, avoiding border-only pages.
+      const rows = Array.from(element.rows).filter((row) => tableRows.has(row));
+      const firstRow = rows[0] ? tableRows.get(rows[0]) : undefined;
+      const lastRow = rows.at(-1) ? tableRows.get(rows.at(-1)!) : undefined;
+      const extent = paint.operations.reduce(
+        (bounds, { bounds: border }) => ({
+          top: Math.min(bounds.top, border.y),
+          bottom: Math.max(bounds.bottom, border.y + border.height),
+        }),
+        { top: firstRow?.y ?? 0, bottom: lastRow ? lastRow.y + lastRow.height : 0 },
+      );
+      if (firstRow && extent.top < firstRow.y) {
+        firstRow.height += firstRow.y - extent.top;
+        firstRow.y = extent.top;
+      }
+      if (lastRow) lastRow.height = Math.max(lastRow.height, extent.bottom - lastRow.y);
+      const head = element.tHead;
+      if (repeatTableHeaders && head && paint.headerBounds) {
+        const bounds = paint.headerBounds;
+        const included = paint.operations.filter(
+          (border) =>
+            border.bounds.y < bounds.y + bounds.height + 0.001 &&
+            border.bounds.y + border.bounds.height > bounds.y - 0.001,
+        );
+        headerPaint.set(head, [...(headerPaint.get(head) ?? []), ...included]);
       }
     }
   }
@@ -797,5 +1009,23 @@ export function measurePreparedLayout(
       'Visible source text or paint overflows the root border box.',
     );
   }
-  return { width: origin.width, height: origin.height, operations, warnings, atomicBounds };
+  return {
+    width: origin.width,
+    height: origin.height,
+    operations,
+    warnings,
+    atomicBounds,
+    ...(repeatTableHeaders
+      ? {
+          tableHeaders: measureTableHeaders(
+            root,
+            origin,
+            operations,
+            headerPaint,
+            elementBoxes,
+            collapsedTables,
+          ),
+        }
+      : {}),
+  };
 }

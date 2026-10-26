@@ -10,6 +10,7 @@ function requiredFiles(): PackedFile[] {
   const paths = [
     'package.json',
     'README.md',
+    'API.md',
     'LICENSE',
     'assets/renderpdf-logo.png',
     'dist/index.js',

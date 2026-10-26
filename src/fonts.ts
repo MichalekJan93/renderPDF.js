@@ -42,7 +42,7 @@ const reservedFamilies = new Set([
 /** Admit only static SFNT programs whose exact browser and PDF instances can agree.
  * @param bytes Owned TTF/OTF program; the browser still validates its actual font tables.
  */
-function assertStaticSfnt(bytes: Uint8Array): void {
+export function assertStaticSfnt(bytes: Uint8Array): void {
   if (bytes.byteLength < 12) {
     throw new RenderPDFError('FONT_LOAD_FAILED', 'Provide a complete static TTF/OTF font program.');
   }

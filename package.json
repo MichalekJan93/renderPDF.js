@@ -1,7 +1,7 @@
 {
   "name": "renderpdf-js",
-  "version": "0.2.1",
-  "description": "Convert HTML, PNG, JPEG and multipage TIFF to PDF in the browser.",
+  "version": "0.3.0",
+  "description": "Create PDFs from HTML, images or code, and merge or split existing PDFs.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,7 +18,10 @@
     "typescript",
     "html-to-pdf",
     "image-to-pdf",
-    "tiff-to-pdf"
+    "tiff-to-pdf",
+    "pdf-generation",
+    "pdf-merge",
+    "pdf-split"
   ],
   "publishConfig": {
     "access": "public",
@@ -37,6 +40,7 @@
     "dist/index.js",
     "dist/*.d.ts",
     "README.md",
+    "API.md",
     "LICENSE",
     "assets/renderpdf-logo.png"
   ],
@@ -52,6 +56,7 @@
     "typecheck": "vp check --no-fmt --no-lint",
     "test": "vp test",
     "test:browser": "playwright test",
+    "test:devextreme": "playwright test --config playwright.devextreme.config.ts",
     "benchmark": "npm run build:library && playwright test --config playwright.benchmark.config.ts",
     "lint": "vp lint",
     "format": "vp fmt",

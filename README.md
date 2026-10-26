@@ -4,25 +4,35 @@
 
 # RenderPDF.js
 
-**Convert HTML, PNG, JPEG and multipage TIFF to PDF in the browser.**
+**Create PDFs from HTML, images or code, and merge or split existing PDFs.**
 
 [![npm version](https://img.shields.io/npm/v/renderpdf-js)](https://www.npmjs.com/package/renderpdf-js)
 [![CI](https://github.com/MichalekJan93/renderPDF.js/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/MichalekJan93/renderPDF.js/actions/workflows/check.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/MichalekJan93/renderPDF.js/blob/main/LICENSE)
 
-HTML exports use the browser's layout, keep text selectable and split content
-across pages. Conversion runs locally, without a conversion server.
+RenderPDF.js is a JavaScript and TypeScript library for creating PDF documents,
+converting HTML and images, and working with existing PDF pages. It runs locally,
+without a conversion server.
 
-**Experimental.** Chromium is the verified browser. Firefox and Safari have not
-been verified. HTML rendering supports the [subset described below](#supported-scope).
+HTML exports use the browser's layout, keep text selectable and split content
+across pages. Document creation and PDF composition also work in Node.js,
+without a DOM.
+
+**Experimental.** HTML rendering is verified in Chromium; Firefox and Safari have
+not been verified. Supported HTML and CSS are [described below](#supported-scope).
 
 ## Features
 
-- Selectable HTML text with embedded fonts, native boxes, images and tables.
-- Automatic pagination, repeated table headers, page headers and page numbers.
-- PNG/JPEG conversion and one PDF page per frame of a multipage TIFF.
-- Paper sizes, margins, document properties, progress events and cancellation.
-- ESM package with TypeScript declarations.
+- Create documents with text, images, vector graphics, links and form fields.
+- Merge PDFs, extract selected pages and split documents without rasterizing them.
+- Export supported HTML/CSS with selectable text and automatic pagination.
+- Convert PNG/JPEG and multipage TIFF files to PDF.
+- Add repeated table headers, page text, page numbers and document properties.
+- Use the DevExtreme PDF exporter through an optional compatibility adapter.
+- ESM package with TypeScript declarations, cancellation and conversion progress.
+
+See the [API guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md)
+for methods, coordinate conventions and compatibility limits.
 
 ## Getting started
 
@@ -30,9 +40,60 @@ been verified. HTML rendering supports the [subset described below](#supported-s
 npm install renderpdf-js
 ```
 
-Use the package in a browser application with an ESM bundler, such as Vite.
+For browser applications, use an ESM bundler such as Vite.
 The [playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playground)
 provides an HTML editor, preview and PDF download from a source checkout.
+
+## Create a document
+
+```ts
+import { createDocument } from 'renderpdf-js';
+
+const document = await createDocument({ unit: 'mm', format: 'A4' });
+const page = document.addPage();
+page.drawText('Invoice', { x: 20, y: 25, fontSize: 18 });
+page.drawRectangle({ x: 20, y: 35, width: 170, height: 20, stroke: '#333333' });
+
+const pdf = await document.toResult();
+await pdf.download('invoice.pdf');
+```
+
+Coordinates start at the top-left; text `y` is its baseline. Font sizes always use
+points. The document API works without a DOM. Built-in Helvetica, Times and Courier
+cover basic text; provide static TTF/OTF bytes in `fonts` for Czech and other Unicode
+characters. Fonts are prepared before drawing. After `toResult()`, the document is
+immutable.
+
+Use `pdf.toUint8Array()` or `pdf.toBlob()` outside the browser; `download()` is a
+browser action.
+
+## Combine and split PDFs
+
+```ts
+import { mergePDFs, extractPDFPages, splitPDF } from 'renderpdf-js';
+
+const combined = await mergePDFs([firstFile, secondFile]);
+await combined.download('combined.pdf');
+
+const selected = await extractPDFPages(firstFile, [3, 1]);
+const individualPages = await splitPDF(firstFile);
+```
+
+Inputs can be `File`/`Blob`, `ArrayBuffer`, `Uint8Array` or a completed export result.
+Page numbers are one-based. Pages retain their native text, vectors, sizes and
+rotation. Flatten interactive forms before importing them; encrypted PDFs and
+unsupported destinations fail explicitly. Document-level bookmarks, signatures and
+metadata are not merged. See the [composition limits](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md#pdf-composition).
+
+## DevExtreme integration
+
+`createJsPDFAdapter()` provides the synchronous drawing and text measurement
+contract used by the DevExtreme PDF exporter. Supply fonts when creating it, pass
+the result as `jsPDFDocument`, then **await** `save()` or `output('blob')`.
+The adapter covers the tested exporter contract; it does not emulate every jsPDF
+plugin or its synchronous serialization. The [API guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md#devextreme-adapter)
+includes an example and the optional integration test command. DevExtreme is not
+a dependency of this library.
 
 ## HTML usage
 

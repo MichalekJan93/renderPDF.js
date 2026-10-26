@@ -2,7 +2,7 @@
 
 A small, independent Vite+ application for checking the packaged library. Paste static HTML, update its live preview, and download a PDF. Conversion runs in the browser; the document is not uploaded.
 
-The application imports `renderpdf-js` from the local npm archive through `file:../artifacts/renderpdf-js-0.2.0.tgz`. It never imports the library's source directory.
+The application imports `renderpdf-js` from the local npm archive through `file:../artifacts/renderpdf-js-0.2.1.tgz`. It never imports the library's source directory.
 
 ## Run locally
 
@@ -13,7 +13,7 @@ npm ci
 npm pack --pack-destination artifacts
 cd playground
 npm uninstall renderpdf-js
-npm install ../artifacts/renderpdf-js-0.2.0.tgz
+npm install ../artifacts/renderpdf-js-0.2.1.tgz
 npm run dev
 ```
 
@@ -26,7 +26,7 @@ Reinstalling the archive refreshes the lockfile integrity for the current local 
 npm pack --pack-destination artifacts
 cd playground
 npm uninstall renderpdf-js
-npm install ../artifacts/renderpdf-js-0.2.0.tgz
+npm install ../artifacts/renderpdf-js-0.2.1.tgz
 npm run dev
 ```
 

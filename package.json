@@ -1,7 +1,7 @@
 {
   "name": "renderpdf-js",
-  "version": "0.2.0",
-  "description": "Browser-side HTML and image to PDF renderer with explicit fonts, local rasters and multipage TIFF",
+  "version": "0.2.1",
+  "description": "Convert HTML, PNG, JPEG and multipage TIFF to PDF in the browser.",
   "license": "MIT",
   "repository": {
     "type": "git",

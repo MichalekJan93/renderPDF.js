@@ -69,6 +69,8 @@ function assertSelfContained(
   const rootBounds = element.getBoundingClientRect();
   // Include the region itself when checking resources and context-dependent effects.
   const descendants = [element, ...element.querySelectorAll('*')];
+  // Programmatic customized built-ins can serialize is= without exposing an is attribute.
+  const nativePrototypes = new Map<string, object | null>();
   for (const descendant of descendants) {
     if (!isHtmlElement(descendant)) {
       throw new RenderPDFError(
@@ -76,18 +78,35 @@ function assertSelfContained(
         'Raster capture supports HTML subtrees only; inline SVG needs a separate experiment.',
       );
     }
-    if (
-      descendant.shadowRoot ||
-      descendant.tagName.includes('-') ||
-      descendant.tagName === 'SLOT'
-    ) {
-      throw new RenderPDFError(
-        'RASTER_FAILED',
-        'Raster capture does not inspect shadow trees or distributed slot content in supported renderer.',
+    // Never instantiate a custom tag while obtaining the native same-tag prototype.
+    if (!descendant.localName.includes('-') && !nativePrototypes.has(descendant.localName)) {
+      nativePrototypes.set(
+        descendant.localName,
+        Object.getPrototypeOf(element.ownerDocument.createElement(descendant.localName)),
       );
     }
     if (
-      /^(CANVAS|IFRAME|OBJECT|EMBED|VIDEO|AUDIO|INPUT|TEXTAREA|SELECT|SCRIPT|STYLE|LINK)$/.test(
+      descendant.shadowRoot ||
+      descendant.tagName.includes('-') ||
+      descendant.tagName === 'SLOT' ||
+      descendant.hasAttribute('is') ||
+      Object.getPrototypeOf(descendant) !== nativePrototypes.get(descendant.localName)
+    ) {
+      throw new RenderPDFError(
+        'RASTER_FAILED',
+        'Raster capture does not support custom elements, customized built-ins, shadow trees or distributed slot content.',
+      );
+    }
+    // Cloned inline handlers can run again when the clone reloads its local images.
+    if (Array.from(descendant.attributes).some((attribute) => /^on/i.test(attribute.name))) {
+      throw new RenderPDFError(
+        'RASTER_FAILED',
+        'Raster capture does not support inline event handlers.',
+      );
+    }
+    // Cloning picture sources can fetch img.src even when currentSrc is an inline bitmap.
+    if (
+      /^(CANVAS|IFRAME|FRAME|FRAMESET|OBJECT|EMBED|VIDEO|AUDIO|PICTURE|SOURCE|INPUT|TEXTAREA|SELECT|SCRIPT|STYLE|LINK|TEMPLATE)$/.test(
         descendant.tagName,
       )
     ) {
@@ -174,7 +193,12 @@ function assertSelfContained(
     }
 
     if (isHtmlTag(descendant, 'img')) {
-      if (descendant.srcset || !INLINE_BITMAP.test(descendant.currentSrc || descendant.src)) {
+      // The clone reads src; currentSrc can instead come from a picture outside this region.
+      if (
+        descendant.srcset ||
+        !INLINE_BITMAP.test(descendant.src) ||
+        !INLINE_BITMAP.test(descendant.currentSrc || descendant.src)
+      ) {
         throw new RenderPDFError(
           'RASTER_FAILED',
           'Raster capture requires inline bitmap images without srcset.',

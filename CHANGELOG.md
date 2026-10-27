@@ -6,6 +6,25 @@ than every changed file. The **Why** column describes the problem each change
 addresses. Release contents were checked against the Git tags, commit diffs and
 npm version history.
 
+## [0.5.1](https://www.npmjs.com/package/renderpdf-js/v/0.5.1) — 2026-10-27
+
+| What changed                                                                                                                    | Where                                                                           | Why                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Validate PDF container syntax, decoded object/xref stream budgets and page/form ownership before backend traversal.             | `src/pdf-input.ts`, `src/compose-pdf.ts`, `README.md`, `API.md`                 | Bound structural allocations and reject ambiguous or cyclic input explicitly.                                           |
+| Reject additional/chained PDF actions and unsafe copied URI schemes, including during form flattening.                          | `src/compose-pdf.ts`                                                            | Prevent unsupported active actions from surviving page composition.                                                     |
+| Decode CCITT TIFF runs into a fixed packed raster with checked row bounds.                                                      | `src/ccitt.ts`, `src/tiff.ts`                                                   | Prevent small malformed fax strips from growing unbounded temporary run arrays while retaining valid Group 2/3/4 scans. |
+| Apply strict bitmap and bounded PNG validation to freshly fetched native HTML image bytes.                                      | `src/pdf.ts`                                                                    | Keep export-time responses behind the same validation boundary as standalone image input.                               |
+| Reject hidden template content, active/customized raster elements and unsupported CSS scope rules before attachment or cloning. | `src/render-html.ts`, `src/raster.ts`, `playground/src/preview.ts`, `README.md` | Close template/host-isolation bypasses and avoid repeating existing application callbacks.                              |
+| Pin existing GitHub Actions versions to immutable commits.                                                                      | `.github/workflows/check.yml`                                                   | Prevent a moved upstream version tag from silently changing CI code.                                                    |
+
+PDF composition now requires the documented strict input profile. Some otherwise
+valid PDFs with ambiguous parser controls or unsupported structural stream
+encodings must be normalized by their owner before import. HTML raster capture
+also rejects inline event handlers and custom/customized elements before cloning.
+
+Security regression scripts, fixtures and reports remain local under ignored
+`artifacts/` paths.
+
 ## [0.5.0](https://www.npmjs.com/package/renderpdf-js/v/0.5.0) — 2026-10-27
 
 | What changed                                                                                                                                            | Where                                                                                        | Why                                                                                                                |

@@ -81,6 +81,10 @@ function isolatedCss(css: string): string {
    */
   function mapRules(rules: CSSRuleList): void {
     for (const rule of rules) {
+      // Scope headers can target the shadow host even when nested selectors are harmless.
+      if (/^@scope\b/i.test(rule.cssText)) {
+        throw new Error('Pravidla CSS @scope nejsou v tomto izolovaném náhledu podporovaná.');
+      }
       if (rule instanceof CSSStyleRule) {
         rule.selectorText = rule.selectorText.replace(
           /(\[(?:[^\]"']|"[^"]*"|'[^']*')*\]|"[^"]*"|'[^']*')|(:root\b)|(^|[\s>+~,(])(html|body)(?=[\s.#:[>+~),]|$)|(:(?:host|host-context)\b|::(?:slotted|part)\b)/gi,

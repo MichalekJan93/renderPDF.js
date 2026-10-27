@@ -170,6 +170,25 @@ option or earlier flattening by the document owner.
 Document-level outlines, signatures, attachments and original metadata are not copied.
 Composition is limited to 1,000 pages, 128 MiB per input and 256 MiB total input.
 
+Before backend loading, structural object/xref streams are checked against a
+2 MiB decoded limit per stream and 16 MiB in total per composition. The same
+preflight limits structural entries to 100,000, container tokens to 2 million and
+container nesting to 64. Page and AcroForm ownership trees must be unique,
+consistent and at most 64 levels deep. These limits also apply when the document
+builder loads existing PDF bytes.
+
+Input must have a standalone supported PDF header line at byte zero, unsigned
+decimal structural indexes, uppercase hexadecimal name escapes, direct stream
+lengths and direct stream types when present. Structural streams accept no filter or a
+single direct `FlateDecode` filter without decoding parameters. Ambiguous,
+indirect or unsupported structural controls and duplicate dictionary keys reject
+with `INVALID_SOURCE`; this deliberately excludes some otherwise valid PDFs.
+
+Page/annotation additional actions, chained actions and unsafe URI schemes reject
+before copying. Form actions reject before optional flattening. Supported copied
+URI schemes are HTTP, HTTPS, mailto and tel. This policy does not make composition
+a general sanitizer for every possible PDF viewer feature.
+
 ## DevExtreme adapter
 
 ```ts

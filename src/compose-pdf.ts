@@ -1,4 +1,14 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFSignature } from 'pdf-lib';
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFNumber,
+  PDFRef,
+  PDFSignature,
+  PDFString,
+} from 'pdf-lib';
 import type { PDFPage } from 'pdf-lib';
 import type { PDFMetadata, RenderPDFResult, RenderProgress } from './api-types.js';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
@@ -6,6 +16,7 @@ import { applyPDFMetadata, resolveMetadata } from './export-options.js';
 import { withCancellation } from './prepare.js';
 import { createProgressReporter } from './progress.js';
 import { createResult } from './result.js';
+import { validatePDFInput, type PDFInputBudget } from './pdf-input.js';
 
 /** An existing PDF or an immutable export result; URLs are fetched by the application. */
 export type PDFSource = Blob | ArrayBuffer | Uint8Array | Pick<RenderPDFResult, 'toUint8Array'>;
@@ -118,8 +129,202 @@ function ownSources(sources: readonly PDFSource[]): OwnedSource[] {
   });
 }
 
+/** Bound the actual page tree before backend recursion or cached page counts can traverse it. */
+function validatePageTree(pdf: PDFDocument, signal?: AbortSignal): void {
+  // Repeated nodes, including shared subtrees, must never multiply backend traversal work.
+  const visited = new Set<PDFDict>();
+  const root = pdf.catalog.lookup(PDFName.of('Pages'), PDFDict);
+
+  /** Count each real leaf once and verify its declared ownership and subtree count.
+   * @param node Current page-tree dictionary, resolved through the donor context.
+   * @param parent Actual containing Pages dictionary; absent only for the root.
+   * @param depth Bounded tree edges from the root, independent of encoded-object nesting.
+   */
+  function visit(node: PDFDict, parent: PDFDict | undefined, depth: number): number {
+    throwIfAborted(signal);
+    if (depth > 64 || visited.has(node)) {
+      throw new RenderPDFError(
+        'INVALID_SOURCE',
+        'PDF page tree must be unique, acyclic and at most 64 levels deep.',
+      );
+    }
+    visited.add(node);
+    // Matching Parent references also prevents cycles during inherited-resource lookup.
+    const owner = node.lookupMaybe(PDFName.of('Parent'), PDFDict);
+    if (parent ? owner !== parent : owner !== undefined) {
+      throw new RenderPDFError('INVALID_SOURCE', 'PDF page tree has an invalid Parent reference.');
+    }
+    const type = node.get(PDFName.of('Type'))?.toString();
+    if (type === '/Page') {
+      if (node.has(PDFName.of('Kids'))) {
+        throw new RenderPDFError('INVALID_SOURCE', 'A PDF page leaf cannot contain Kids.');
+      }
+      return 1;
+    }
+    if (type !== '/Pages') {
+      throw new RenderPDFError(
+        'INVALID_SOURCE',
+        'PDF page tree must contain Pages branches and Page leaves.',
+      );
+    }
+    // A valid tree with at most 1,000 leaves never needs a branch wider than that limit.
+    const children = node.lookup(PDFName.of('Kids'), PDFArray);
+    if (children.size() === 0 || children.size() > MAX_PAGES) {
+      throw new RenderPDFError(
+        'INVALID_SOURCE',
+        'PDF page-tree branches must contain 1 to 1,000 children.',
+      );
+    }
+    let pages = 0;
+    for (let index = 0; index < children.size(); index += 1) {
+      const reference = children.get(index);
+      if (!(reference instanceof PDFRef)) {
+        throw new RenderPDFError(
+          'INVALID_SOURCE',
+          'PDF page-tree children must be indirect references.',
+        );
+      }
+      pages += visit(pdf.context.lookup(reference, PDFDict), node, depth + 1);
+      if (pages > MAX_PAGES) {
+        throw new RenderPDFError(
+          'INVALID_SOURCE',
+          'Each source PDF must contain 1 to 1,000 pages.',
+        );
+      }
+    }
+    const declared = node.lookup(PDFName.of('Count'), PDFNumber).asNumber();
+    if (declared !== pages) {
+      throw new RenderPDFError('INVALID_SOURCE', 'PDF page-tree Count disagrees with its leaves.');
+    }
+    return pages;
+  }
+
+  visit(root, undefined, 0);
+}
+
+/** Bound AcroForm ownership before backend field enumeration recursively follows Kids/Parent. */
+function validateFormTree(pdf: PDFDocument, form: PDFDict, signal?: AbortSignal): void {
+  // Field/widget dictionaries must appear once even when their serialized references are shared.
+  const visited = new Set<PDFDict>();
+
+  /** Inspect one field or widget without constructing backend form wrappers.
+   * @param node Current field/widget dictionary resolved from one indirect reference.
+   * @param parent Actual containing field; top-level Fields have no Parent.
+   * @param depth Number of field ownership edges from the root Fields array.
+   */
+  function visit(node: PDFDict, parent: PDFDict | undefined, depth: number): void {
+    throwIfAborted(signal);
+    if (depth > 64 || visited.has(node) || visited.size >= 100_000) {
+      throw new RenderPDFError(
+        'INVALID_SOURCE',
+        'PDF form tree exceeds its unique, acyclic ownership limits.',
+      );
+    }
+    visited.add(node);
+    const owner = node.lookupMaybe(PDFName.of('Parent'), PDFDict);
+    if (parent ? owner !== parent : owner !== undefined) {
+      throw new RenderPDFError('INVALID_SOURCE', 'PDF form tree has an invalid Parent reference.');
+    }
+    if (['A', 'AA', 'Next'].some((key) => node.has(PDFName.of(key)))) {
+      throw new RenderPDFError('INVALID_SOURCE', 'PDF form actions cannot be flattened.');
+    }
+    const children = node.lookupMaybe(PDFName.of('Kids'), PDFArray);
+    if (!children) return;
+    for (let index = 0; index < children.size(); index += 1) {
+      const reference = children.get(index);
+      if (!(reference instanceof PDFRef)) {
+        throw new RenderPDFError(
+          'INVALID_SOURCE',
+          'PDF form children must be indirect references.',
+        );
+      }
+      visit(pdf.context.lookup(reference, PDFDict), node, depth + 1);
+    }
+  }
+
+  const roots = form.lookupMaybe(PDFName.of('Fields'), PDFArray);
+  for (let index = 0; index < (roots?.size() ?? 0); index += 1) {
+    const reference = roots!.get(index);
+    if (!(reference instanceof PDFRef)) {
+      throw new RenderPDFError('INVALID_SOURCE', 'PDF form fields must be indirect references.');
+    }
+    visit(pdf.context.lookup(reference, PDFDict), undefined, 0);
+  }
+}
+
+/** Reject active page/annotation actions before copying or flattening any donor objects. */
+function assertSafeActions(pdf: PDFDocument): void {
+  for (const page of pdf.getPages()) {
+    if (page.node.has(PDFName.of('AA'))) {
+      throw new RenderPDFError(
+        'INVALID_SOURCE',
+        'PDF page additional actions cannot be preserved.',
+      );
+    }
+    const annotations = page.node.Annots();
+    for (let index = 0; index < (annotations?.size() ?? 0); index += 1) {
+      const annotation = annotations!.lookup(index, PDFDict);
+      if (annotation.has(PDFName.of('AA')) || annotation.has(PDFName.of('Next'))) {
+        throw new RenderPDFError(
+          'INVALID_SOURCE',
+          'PDF annotation additional/chained actions cannot be preserved.',
+        );
+      }
+      const action = annotation.lookupMaybe(PDFName.of('A'), PDFDict);
+      if (!action) continue;
+      const actionType = action.get(PDFName.of('S'))?.toString();
+      if (
+        action.has(PDFName.of('Next')) ||
+        action.has(PDFName.of('AA')) ||
+        !['/URI', '/GoTo'].includes(actionType ?? '')
+      ) {
+        throw new RenderPDFError(
+          'INVALID_SOURCE',
+          'This PDF annotation action cannot be preserved.',
+        );
+      }
+      if (actionType === '/URI') {
+        // PDF strings are decoded through public APIs; byte escapes cannot conceal an unsafe scheme.
+        const value = pdf.context.lookup(action.get(PDFName.of('URI')));
+        if (!(value instanceof PDFString) && !(value instanceof PDFHexString))
+          throw new RenderPDFError(
+            'INVALID_SOURCE',
+            'PDF links require a literal or hexadecimal URI string.',
+          );
+        const text = value.decodeText();
+        if (
+          !text.trim() ||
+          Array.from(text).some(
+            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+          )
+        )
+          throw new RenderPDFError(
+            'INVALID_SOURCE',
+            'PDF links cannot contain control characters.',
+          );
+        let url: URL;
+        try {
+          url = new URL(text);
+        } catch (cause) {
+          throw new RenderPDFError(
+            'INVALID_SOURCE',
+            'PDF links require an absolute supported URI.',
+            { cause },
+          );
+        }
+        if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol))
+          throw new RenderPDFError(
+            'INVALID_SOURCE',
+            'PDF links support HTTP, HTTPS, mailto and tel URIs only.',
+          );
+      }
+    }
+  }
+}
+
 /** Inspect navigation without creating an AcroForm or modifying the donor document. */
 function inspectLinks(pdf: PDFDocument): InternalLink[][] {
+  assertSafeActions(pdf);
   const form = pdf.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
   if (form?.has(PDFName.of('XFA')) || form?.lookupMaybe(PDFName.of('Fields'), PDFArray)?.size()) {
     throw new RenderPDFError(
@@ -170,16 +375,26 @@ function inspectLinks(pdf: PDFDocument): InternalLink[][] {
 }
 
 /** Load strictly and leave encryption handling to the parser's rejecting default. */
-async function loadSource(bytes: Uint8Array, signal?: AbortSignal, flattenForms = false) {
+async function loadSource(
+  bytes: Uint8Array,
+  signal?: AbortSignal,
+  flattenForms = false,
+  budget?: PDFInputBudget,
+) {
   try {
+    // Reject structural allocation hazards before the backend performs eager object/xref inflation.
+    await validatePDFInput(bytes, signal, budget);
     const pdf = await withCancellation(
       PDFDocument.load(bytes, { updateMetadata: false, throwOnInvalidObject: true }),
       signal,
     );
+    validatePageTree(pdf, signal);
     const count = pdf.getPageCount();
     if (count === 0 || count > MAX_PAGES) {
       throw new RenderPDFError('INVALID_SOURCE', 'Each source PDF must contain 1 to 1,000 pages.');
     }
+    // Flattening must not silently remove actions that the source policy otherwise rejects.
+    assertSafeActions(pdf);
     if (flattenForms) {
       // Flatten only fields whose existing appearances can become ordinary page paint.
       const form = pdf.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
@@ -190,6 +405,7 @@ async function loadSource(bytes: Uint8Array, signal?: AbortSignal, flattenForms 
         );
       }
       if (form?.lookupMaybe(PDFName.of('Fields'), PDFArray)?.size()) {
+        validateFormTree(pdf, form, signal);
         if (
           pdf
             .getForm()
@@ -293,6 +509,8 @@ export async function appendPDFPages(
   signal?: AbortSignal,
 ): Promise<readonly PDFPage[]> {
   throwIfAborted(signal);
+  // Direct internal callers may supply a document that did not pass loadSource.
+  validatePageTree(donor, signal);
   if (pageNumbers !== undefined && !Array.isArray(pageNumbers)) {
     throw new RenderPDFError(
       'INVALID_OPTIONS',
@@ -371,6 +589,12 @@ async function compose(
   try {
     if (report) await report({ stage: 'preparing', completed: 0, total: owned.length });
     const loaded: Awaited<ReturnType<typeof loadSource>>[] = [];
+    // Every source shares one preflight budget, so many small donors cannot multiply structural limits.
+    const inputBudget: PDFInputBudget = {
+      decodedStructuralBytes: 0,
+      objectCount: 0,
+      tokenCount: 0,
+    };
     let totalBytes = 0;
     let plannedPages = 0;
     for (const [index, source] of owned.entries()) {
@@ -380,7 +604,7 @@ async function compose(
       if (totalBytes > MAX_TOTAL_BYTES) {
         throw new RenderPDFError('INVALID_SOURCE', 'Combined source PDFs must not exceed 256 MiB.');
       }
-      const donor = await loadSource(bytes, signal, flattenForms);
+      const donor = await loadSource(bytes, signal, flattenForms, inputBudget);
       plannedPages += chosen?.length ?? donor.pdf.getPageCount();
       if (plannedPages > MAX_PAGES) {
         throw new RenderPDFError(

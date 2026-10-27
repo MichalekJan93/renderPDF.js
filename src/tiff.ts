@@ -1,6 +1,7 @@
 import type { IFD } from 'utif2';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
 import { assertImageSize } from './image-geometry.js';
+import { decodeCcitt } from './ccitt.js';
 
 /** A single unrotated TIFF raster; the PDF writer applies its explicit orientation matrix. */
 export interface TiffFrame {
@@ -334,11 +335,29 @@ export async function openTiff(input: Uint8Array, signal?: AbortSignal): Promise
         malformed('frame index is outside the document.');
       const frame = frames[index]!;
       const stride = Math.ceil((frame.width * frame.samples * frame.bits) / 8);
+      // Fax runs decode into a fixed packed raster; UTIF's expanding temporary run arrays are bypassed.
+      const faxPixels = [2, 3, 4].includes(frame.compression)
+        ? new Uint8Array(stride * frame.height)
+        : undefined;
       for (let strip = 0; strip < frame.offsets.length; strip += 1) {
         const rows = Math.min(frame.rowsPerStrip, frame.height - strip * frame.rowsPerStrip);
         const expected = rows * stride;
         const offset = frame.offsets[strip]!;
         const count = frame.counts[strip]!;
+        if (faxPixels) {
+          faxPixels.set(
+            decodeCcitt(
+              bytes.subarray(offset, offset + count),
+              frame.width,
+              rows,
+              frame.compression,
+              scalar(frame.tags, 266, 1),
+              frame.compression === 3 && scalar(frame.tags, 292, 0) === 1,
+              signal,
+            ),
+            strip * frame.rowsPerStrip * stride,
+          );
+        }
         if (frame.compression === 1 && count !== expected)
           malformed('an uncompressed strip has the wrong byte length.');
         if (frame.compression === 5) validateLzw(bytes.subarray(offset, offset + count), expected);
@@ -357,7 +376,12 @@ export async function openTiff(input: Uint8Array, signal?: AbortSignal): Promise
         // Existing HTML and native PNG/JPEG exports never initialize the TIFF decoder.
         const UTIF = (await import('utif2')).default;
         throwIfAborted(signal);
-        UTIF.decodeImage(bytes.buffer, image);
+        if (faxPixels) {
+          // The public RGBA adapter needs the same metadata normally set by decodeImage.
+          image.width = frame.width;
+          image.height = frame.height;
+          image.data = faxPixels;
+        } else UTIF.decodeImage(bytes.buffer, image);
         if (!(image.data instanceof Uint8Array) || image.data.length !== stride * frame.height)
           malformed('the decoder returned an incomplete raster.');
         rgba = UTIF.toRGBA8(image);

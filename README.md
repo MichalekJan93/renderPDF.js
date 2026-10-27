@@ -173,8 +173,8 @@ elements whose first computed family is unregistered and reports
 `FONT_SUBSTITUTED`; it changes their appearance, so it cannot preserve an
 unprovided system font such as Tahoma. HTML header/footer fragments live in
 separate shadow roots: include their CSS inline or in each fragment. Scripts,
-frames, active attributes and refresh metadata are rejected. Ordinary image and
-CSS URLs may still trigger browser requests.
+frames, templates, customized built-ins, active attributes and refresh metadata
+are rejected. Ordinary image and CSS URLs may still trigger browser requests.
 
 ## Standalone image files
 
@@ -318,16 +318,20 @@ ligature; vocalized Arabic is not yet covered by the selectable-text guarantee.
 
 PNG/JPEG resources can use data, blob, same-origin or CORS-readable URLs. External
 images may be fetched by the browser; documents are never sent to a conversion
-service. JPEG orientation in HTML must be absent or `1`; normalize rotated pixels
-before using them in an `<img>` element.
+service. Freshly fetched image bytes receive the same structural, dimension and
+PNG decompression checks as standalone image input. PNG/JPEG orientation in HTML
+must be absent or `1`; normalize rotated pixels before using an `<img>` element.
 
 Gradients, rounded corners, inline bitmap backgrounds, inset shadows and opacity
 can use local raster fallback on supported rectangular blocks. `data-raster`
 selects a region explicitly. Regions are captured once in paint order; descendant
 text gets an extraction layer where safe. Raster resources must be inline bitmaps;
-external resources, transforms, backdrop effects and effects outside the border
-box are unsupported. Wrapped inline backgrounds or borders require a containing
-raster region; inline and table-internal raster boundaries are unsupported.
+responsive images (`<picture>`, `<source>` and `img[srcset]`), external resources,
+transforms, backdrop effects and effects outside the border box are unsupported.
+Inline event handlers and custom elements, including customized built-ins, are
+rejected before capture so cloning cannot repeat their application callbacks.
+Wrapped inline backgrounds or borders require a containing raster region; inline
+and table-internal raster boundaries are unsupported.
 
 ### Pagination and tables
 
@@ -387,8 +391,31 @@ CSSOM edits and computed-style-only changes; it emits
 
 BigTIFF, tiled TIFF, SubIFDs/RAW layouts, planar-separated samples, 16-bit/float
 samples and JPEG-compressed TIFF fail with `UNSUPPORTED_IMAGE`. The TIFF decoder
-loads only when needed. Structural checks reject malformed input, but cannot
-identify every damaged JPEG scan or CCITT bitstream.
+uses a bounded packed-raster implementation for CCITT runs; the remaining TIFF
+codec/color-conversion dependency loads only when needed. Structural checks
+reject malformed input, but cannot identify every damaged JPEG scan or all
+possible unsupported image features.
+
+### Existing PDF input limits
+
+Composition checks the input container before the PDF backend loads it. Each
+object/xref stream may expand to at most **2 MiB**, with **16 MiB** total decoded
+structural streams, **100,000 structural entries**, **2 million container tokens**
+and **64 levels of container nesting** per composition. Page and form ownership
+trees must be acyclic, consistent and at most 64 levels deep. The existing
+1,000-page and encoded-input limits also apply.
+
+The supported profile requires a standalone PDF header line at byte zero,
+unsigned decimal structural indexes, uppercase hexadecimal name escapes, direct
+stream lengths and direct stream types when present. Object/xref streams support no filter or
+one direct `FlateDecode` filter without decoding parameters. Indirect control
+values, duplicate dictionary keys and unsupported structural filters fail with
+`INVALID_SOURCE`. Some otherwise valid PDFs therefore need normalization by
+their owner before composition.
+
+Additional/chained page, annotation and form actions are rejected; copied URI
+links support HTTP, HTTPS, mailto and tel only. Composition preserves PDF paint
+and resources and is not a general sanitizer for every PDF viewer feature.
 
 ## Development
 

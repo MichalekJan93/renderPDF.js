@@ -21,6 +21,7 @@ import type { PDFFont, PDFImage, PDFName, PDFPage } from 'pdf-lib';
 import type { PageGeometry, PDFMetadata, RegisteredFont, RenderProgress } from './api-types.js';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
 import { applyPDFMetadata } from './export-options.js';
+import { inspectBitmap, validatePngData } from './image-input.js';
 import { nativeImageFormat } from './images.js';
 import type { PageText, PreparedPageBand } from './page-bands.js';
 import type { PageSlice } from './pagination.js';
@@ -314,7 +315,19 @@ async function embedImage(
     // Inspect actual signatures rather than trusting a filename or server Content-Type.
     const bytes = new Uint8Array(await response.arrayBuffer());
     throwIfAborted(signal);
-    if (nativeImageFormat(bytes) === 'png') {
+    // The export response can differ from the already-decoded browser image; validate these exact bytes.
+    const bitmap = inspectBitmap(bytes);
+    // HTML image placement cannot apply the standalone image API's EXIF transformation.
+    nativeImageFormat(bytes);
+    if (bitmap.orientation !== 1) {
+      throw new RenderPDFError(
+        'RESOURCE_LOAD_FAILED',
+        'HTML image orientation must be 1; normalize its pixels before exporting.',
+      );
+    }
+    if (bitmap.format === 'png') {
+      await validatePngData(bytes, signal);
+      throwIfAborted(signal);
       return await pdf.embedPng(bytes);
     }
     return await pdf.embedJpg(bytes);

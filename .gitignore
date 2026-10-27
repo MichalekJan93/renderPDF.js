@@ -4,6 +4,8 @@ coverage/
 test-results/
 playwright-report/
 artifacts/
+# Keep the local security regression out of source control.
+/tests/browser/raster-resources.spec.ts
 .vite/
 *.tsbuildinfo
 *.tgz

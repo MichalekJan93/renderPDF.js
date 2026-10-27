@@ -48,7 +48,20 @@ function assertInertMarkup(markup: string, label: string): void {
   // DOMParser is inert; the sandboxed destination additionally forbids script execution.
   const parsed = new DOMParser().parseFromString(markup, 'text/html');
   for (const element of parsed.querySelectorAll('*')) {
-    if (['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'BASE', 'LINK'].includes(element.tagName)) {
+    // Template contents evade querySelectorAll and may activate during srcdoc parsing.
+    if (
+      [
+        'SCRIPT',
+        'IFRAME',
+        'FRAME',
+        'FRAMESET',
+        'OBJECT',
+        'EMBED',
+        'BASE',
+        'LINK',
+        'TEMPLATE',
+      ].includes(element.tagName)
+    ) {
       throw new RenderPDFError(
         'UNSUPPORTED_ELEMENT',
         `${label} cannot contain ${element.tagName}.`,
@@ -56,15 +69,18 @@ function assertInertMarkup(markup: string, label: string): void {
     }
     if (
       element.tagName === 'META' &&
-      element.getAttribute('http-equiv')?.toLowerCase() === 'refresh'
+      element.getAttribute('http-equiv')?.trim().toLowerCase() === 'refresh'
     ) {
       throw new RenderPDFError('UNSUPPORTED_ELEMENT', `${label} cannot refresh the document.`);
     }
     for (const attribute of element.attributes) {
+      // URL parsing discards embedded ASCII tabs/newlines before selecting a scheme.
+      const value = attribute.value.replace(/[\t\n\r]/g, '').trim();
       if (
         attribute.name.toLowerCase().startsWith('on') ||
         attribute.name.toLowerCase() === 'srcdoc' ||
-        /^(?:javascript|vbscript):/i.test(attribute.value.trim())
+        attribute.name.toLowerCase() === 'is' ||
+        /^(?:javascript|vbscript):/i.test(value)
       ) {
         throw new RenderPDFError('UNSUPPORTED_ELEMENT', `${label} contains an active attribute.`);
       }

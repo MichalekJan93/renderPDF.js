@@ -20,13 +20,13 @@ export interface TextOperation {
   bounds: Bounds;
   /** Browser-resolved visible text for this line. */
   text: string;
-  /** Browser-measured words retain native origins without accumulating run-width drift. */
+  /** Browser-measured runs retain native origins without accumulating width drift. */
   runs: {
-    /** Word text, retaining ligatures and non-breaking spaces within each run. */
+    /** Text between collapsible spaces, retaining ligatures and non-breaking spaces. */
     text: string;
-    /** Horizontal word origin relative to the source root, in CSS pixels. */
+    /** Horizontal run origin relative to the source root, in CSS pixels. */
     x: number;
-    /** Browser-measured word advance width in CSS pixels. */
+    /** Browser-measured run advance width in CSS pixels. */
     width: number;
   }[];
   /** Baseline position relative to the root's top edge. */

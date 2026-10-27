@@ -51,6 +51,42 @@ describe('document builder', () => {
     expect(() => first.drawText('Late edit', { x: 1, y: 1 })).toThrow(/finalized/);
   });
 
+  it('draws Arabic and wraps selectable Chinese with real embedded fonts', async () => {
+    const arabic = await readFile(
+      new URL('../public/fonts/NotoSansArabic-Regular.ttf', import.meta.url),
+    );
+    const han = await readFile(
+      new URL('../public/fonts/RenderPDFHanTest-Regular.otf', import.meta.url),
+    );
+    const doc = await createDocument({
+      fonts: [
+        { family: 'Arabic', data: arabic },
+        { family: 'Han', data: han },
+      ],
+    });
+    const page = doc.addPage({ format: { width: 200, height: 200 } });
+    page.drawText('سلام', { x: 20, y: 25, font: 'Arabic', fontSize: 20 });
+    const maxWidth = doc.measureText('中文', { font: 'Han', fontSize: 12 }).width + 0.1;
+    page.drawText('中文测试中文测试', {
+      x: 20,
+      y: 70,
+      font: 'Han',
+      fontSize: 12,
+      maxWidth,
+    });
+    const parsed = await inspect(await (await doc.toResult()).toUint8Array());
+    try {
+      const content = await (await parsed.pdf.getPage(1)).getTextContent();
+      const items = content.items.filter((item) => 'str' in item);
+      expect(items.map((item) => item.str).join('')).toContain('سلام');
+      expect(
+        items.filter((item) => /[\p{Script=Han}]/u.test(item.str)).map((item) => item.str),
+      ).toEqual(['中文', '测试', '中文', '测试']);
+    } finally {
+      await parsed.close();
+    }
+  });
+
   it('snapshots font bytes, custom geometry and metadata before asynchronous preparation', async () => {
     const font = Uint8Array.from(
       await readFile(new URL('../public/fonts/NotoSans-Regular.ttf', import.meta.url)),

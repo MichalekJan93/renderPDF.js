@@ -18,8 +18,12 @@ import type {
   TextOperation,
 } from './types.js';
 
-/** Grapheme boundaries are locale independent for the supported Latin text. */
+/** Grapheme boundaries keep Unicode clusters intact across browser line measurements. */
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+/** Strong RTL letters need their own shaping run when adjacent to LTR text or digits. */
+const rtlGrapheme = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
+const strongGrapheme = /[\p{L}\p{N}]/u;
 
 /** Reuse exact loaded-face metrics within one synchronous measurement only. */
 interface TextMetricsCache {
@@ -88,7 +92,6 @@ function validateVectorStyle(
     style.overflowY !== 'visible' && !(replacedImage && style.overflowY === 'clip') && 'overflow-y',
     style.cssFloat !== 'none' && 'float',
     style.order !== '0' && 'order',
-    style.direction !== 'ltr' && 'direction',
     style.writingMode !== 'horizontal-tb' && 'writing-mode',
     style.textShadow !== 'none' && 'text-shadow',
     style.textDecorationLine !== 'none' && 'text-decoration',
@@ -229,7 +232,6 @@ function measureText(
   // Browser and PDF face selection share CSS weight matching without accepting unknown families.
   const face = resolveRegisteredFont(style, fonts);
   if (
-    style.direction !== 'ltr' ||
     style.writingMode !== 'horizontal-tb' ||
     style.textTransform !== 'none' ||
     style.whiteSpace !== 'normal' ||
@@ -251,7 +253,7 @@ function measureText(
   ) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
-      'Unsupported CSS: text requires horizontal LTR layout with normal whitespace, spacing, font variants and OpenType features, without automatic hyphenation or soft hyphens.',
+      'Unsupported CSS: text requires horizontal layout with normal whitespace, spacing, font variants and OpenType features, without automatic hyphenation or soft hyphens.',
     );
   }
   // FontFaceSet confirms this exact registered face has finished loading.
@@ -295,7 +297,7 @@ function measureText(
     cache.fonts.set(fontDescription, metrics);
   }
   const { ascent, descent } = metrics;
-  // Grapheme boundaries preserve surrogate pairs and combining Czech/Latin marks.
+  // Grapheme boundaries preserve surrogate pairs and combining marks in every script.
   const segments = graphemes.segment(node.data);
   // A reusable Range reads browser-produced geometry, not a synthetic line-breaking algorithm.
   const range = node.ownerDocument.createRange();
@@ -343,19 +345,40 @@ function measureText(
     if (start === end) return [];
     range.setStart(node, start);
     range.setEnd(node, end);
-    // Source offsets remain available for independent per-word Range measurements.
+    // Source offsets remain available for independent per-run Range measurements.
     const sourceLine = node.data.slice(start, end);
     // Collapse only CSS normal-whitespace characters; preserve non-breaking spaces.
     const text = sourceLine.replace(/[\t\n\r\f ]+/g, ' ');
     // Whole-line bounds remain the atomic pagination interval and verification metadata.
     const bounds = relativeBounds(range.getBoundingClientRect(), origin);
-    // Measured word origins prevent endpoint fitting from accumulating drift across a line.
-    const runs = Array.from(sourceLine.matchAll(/[^\t\n\r\f ]+/g), (match) => {
-      range.setStart(node, start + match.index);
-      range.setEnd(node, start + match.index + match[0].length);
-      // Word origins belong to the browser; the writer preserves each word's shaped glyphs.
-      const wordBounds = relativeBounds(range.getBoundingClientRect(), origin);
-      return { text: match[0], x: wordBounds.x, width: wordBounds.width };
+    // Measured run origins prevent endpoint fitting from accumulating drift across a line.
+    const runs = Array.from(sourceLine.matchAll(/[^\t\n\r\f ]+/g)).flatMap((match) => {
+      const pieces: { text: string; offset: number }[] = [];
+      let begin = 0;
+      let direction: 'ltr' | 'rtl' | undefined;
+      for (const segment of graphemes.segment(match[0])) {
+        const next = rtlGrapheme.test(segment.segment)
+          ? 'rtl'
+          : strongGrapheme.test(segment.segment)
+            ? 'ltr'
+            : undefined;
+        if (direction && next && next !== direction) {
+          pieces.push({
+            text: match[0].slice(begin, segment.index),
+            offset: start + match.index + begin,
+          });
+          begin = segment.index;
+        }
+        if (next) direction = next;
+      }
+      pieces.push({ text: match[0].slice(begin), offset: start + match.index + begin });
+      return pieces.map((piece) => {
+        range.setStart(node, piece.offset);
+        range.setEnd(node, piece.offset + piece.text.length);
+        // The browser already resolved bidi placement for each shaped fragment.
+        const runBounds = relativeBounds(range.getBoundingClientRect(), origin);
+        return { text: piece.text, x: runBounds.x, width: runBounds.width };
+      });
     });
     return [
       {
@@ -645,7 +668,7 @@ export function measurePreparedLayout(
     {
       code: 'TEXT_METRICS_APPROXIMATED',
       message:
-        'Baselines are estimated from Canvas font metrics; browser and PDF shaping engines may still differ for unsupported scripts or font features.',
+        'Baselines are estimated from Canvas font metrics; browser and PDF shaping engines may still differ for some scripts or font features.',
     },
   ];
 
@@ -733,7 +756,6 @@ export function measurePreparedLayout(
       insideRaster &&
       (style.transform !== 'none' ||
         style.writingMode !== 'horizontal-tb' ||
-        style.direction !== 'ltr' ||
         style.opacity === '0' ||
         style.clipPath !== 'none' ||
         style.maskImage !== 'none' ||
@@ -742,7 +764,7 @@ export function measurePreparedLayout(
     ) {
       warnings.push({
         code: 'RASTER_TEXT_OMITTED',
-        message: `Raster text extraction omitted for transformed, clipped, hidden, masked, or non-LTR subtree ${element.tagName}.`,
+        message: `Raster text extraction omitted for transformed, clipped, hidden, or masked subtree ${element.tagName}.`,
       });
       return;
     }

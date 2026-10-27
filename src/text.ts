@@ -18,8 +18,8 @@ export interface PositionedGlyph {
 export class PositionedFont {
   /** Original font metrics and OpenType positioning owned by this export. */
   private readonly program: Font;
-  /** Identical words share shaping work without sharing browser coordinates. */
-  private readonly words = new Map<string, readonly PositionedGlyph[]>();
+  /** Identical text runs share shaping work without sharing browser coordinates. */
+  private readonly runs = new Map<string, readonly PositionedGlyph[]>();
   /** Used glyph mappings include GSUB ligatures without Unicode cmap entries. */
   private readonly unicode = new Map<string, readonly number[]>();
   /** Used substituted glyphs also need nominal PDF widths even without cmap entries. */
@@ -39,13 +39,13 @@ export class PositionedFont {
     this.unitsPerEm = this.program.unitsPerEm;
   }
 
-  /** Shape one browser-measured word while retaining kerning, ligatures and marks.
-   * @param text Complete word; splitting into characters would lose OpenType context.
+  /** Shape one browser-measured run while retaining kerning, ligatures and marks.
+   * @param text Complete run; splitting into characters would lose OpenType context.
    * @param kerning Whether CSS admits kerning for this line.
    */
   shape(text: string, kerning = true): readonly PositionedGlyph[] {
     const key = `${kerning ? '1' : '0'}:${text}`;
-    const previous = this.words.get(key);
+    const previous = this.runs.get(key);
     if (previous) return previous;
     const shaped = this.program.layout(text, { kern: kerning });
     const encoded = this.font.encodeText(text).asString();
@@ -74,8 +74,17 @@ export class PositionedFont {
         );
       }
       const position = shaped.positions[index]!;
+      // PDF text extractors reorder RTL runs; reverse multi-letter ligature mappings
+      // so their internal letters return to logical order after that reordering.
+      // shortcut: vowel marks spanning a ligature can still extract out of order; cluster-aware CIDs are needed.
+      const points =
+        shaped.direction === 'rtl' &&
+        glyph.codePoints.length > 1 &&
+        glyph.codePoints.every((point) => /\p{L}/u.test(String.fromCodePoint(point)))
+          ? [...glyph.codePoints].reverse()
+          : [...glyph.codePoints];
       // One PDF CID has one Unicode mapping; keep the first source spelling for aliases.
-      if (!this.unicode.has(code)) this.unicode.set(code, [...glyph.codePoints]);
+      if (!this.unicode.has(code)) this.unicode.set(code, points);
       this.widths.set(code, (glyph.advanceWidth * 1000) / this.unitsPerEm);
       const result = {
         encoded: PDFHexString.of(code),
@@ -86,7 +95,7 @@ export class PositionedFont {
       y += position.yAdvance;
       return result;
     });
-    this.words.set(key, positioned);
+    this.runs.set(key, positioned);
     return positioned;
   }
 

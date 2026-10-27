@@ -58,7 +58,7 @@ export interface CustomPageSize {
 
 /** One selectable line repeated in a reserved area above or below each page's content. */
 export interface PageTextOptions {
-  /** Plain Latin text; {pageNumber} and {pageCount} expand after pagination. */
+  /** Single-line Unicode text; {pageNumber} and {pageCount} expand after pagination. */
   text: string;
   /** Reserved height in CSS pixels, in addition to the page's outer margins. */
   height: number;

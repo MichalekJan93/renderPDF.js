@@ -74,7 +74,6 @@ describe('reserved page text areas', () => {
       { text: 'Title', height: Number.POSITIVE_INFINITY },
       { text: 'First\nSecond', height: 30 },
       { text: 'Hidden\u202e', height: 30 },
-      { text: '漢', height: 30 },
       { text: 'Title', height: 30, fontSize: 0 },
       { text: 'Title', height: 30, fontSize: Number.NaN },
       { text: 'Title', height: 30, align: 'diagonal' },

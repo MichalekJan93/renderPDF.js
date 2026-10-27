@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Multilingual text regression fixture</title>
+    <style>
+      body {
+        margin: 0;
+        background: white;
+      }
+      #source {
+        box-sizing: border-box;
+        width: 680px;
+        padding: 8px;
+        color: #182334;
+        background: white;
+        font-size: 20px;
+        line-height: 1.5;
+      }
+      .sample {
+        margin: 0 0 20px;
+      }
+      .latin,
+      .cyrillic {
+        font-family: 'Multilingual Latin';
+      }
+      .chinese {
+        width: 260px;
+        font-family: 'Multilingual Han';
+      }
+      .traditional {
+        width: 260px;
+        font-family: 'Multilingual Traditional';
+      }
+      .arabic {
+        font-family: 'Multilingual Arabic';
+      }
+      #arabic,
+      #arabic-digits,
+      #mixed {
+        width: 480px;
+        direction: rtl;
+        text-align: right;
+      }
+      #mixed .latin {
+        direction: ltr;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="source">
+      <p class="sample latin" id="latin" lang="cs">Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
+      <p class="sample cyrillic" id="cyrillic" lang="ru">Привет, мир! Проверка текста.</p>
+      <p class="sample chinese" id="chinese" lang="zh-Hans">
+        这是一个没有空格、需要自动换行的简体中文段落。中文测试：你好，世界！
+      </p>
+      <p class="sample traditional" id="traditional" lang="zh-Hant">繁體漢字。</p>
+      <p class="sample arabic" id="arabic" lang="ar" dir="rtl">مرحبا بالعالم سلام</p>
+      <p class="sample arabic" id="arabic-digits" lang="ar" dir="rtl">سلام123</p>
+      <p class="sample" id="mixed" dir="rtl">
+        <span class="arabic" lang="ar">تقرير رقم </span
+        ><span class="latin" lang="en">Report 42</span><span class="arabic" lang="ar"> لعام </span
+        ><span class="latin" lang="en">2026</span>
+      </p>
+    </main>
+    <script type="module">
+      import { registerFont, renderPDF } from '/src/index.ts';
+
+      const definitions = [
+        ['Multilingual Latin', 'NotoSans-Regular.ttf'],
+        ['Multilingual Han', 'RenderPDFHanTest-Regular.otf'],
+        ['Multilingual Arabic', 'NotoSansArabic-Regular.ttf'],
+        ['Multilingual Traditional', 'RenderPDFHanTraditionalTest-Regular.otf'],
+      ];
+      const fonts = await Promise.all(
+        definitions.map(async ([family, filename]) => {
+          const response = await fetch(`/fonts/${filename}`);
+          if (!response.ok) throw new Error(`Missing multilingual fixture font: ${filename}`);
+          return registerFont({ family, data: await response.arrayBuffer() });
+        }),
+      );
+      await document.fonts.ready;
+      window.multilingual = {
+        export: () => renderPDF(document.querySelector('#source'), { fonts, margin: 24 }),
+        exportWithBands: () =>
+          renderPDF(document.querySelector('#source'), {
+            fonts,
+            margin: 24,
+            header: { text: '中文测试', height: 48, font: fonts[1], fontSize: 12 },
+            footer: { text: 'مرحبا', height: 48, font: fonts[2], fontSize: 12, align: 'right' },
+          }),
+      };
+    </script>
+  </body>
+</html>

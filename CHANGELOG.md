@@ -1,10 +1,25 @@
 # Changelog
 
-This file covers every version published to npm through 0.4.0. Dates are npm
-publication dates. The **Where** column names the main code or documentation
-areas, rather than every changed file. The **Why** column describes the problem
-each change addresses. Release contents were checked against the Git tags, commit
-diffs and npm version history.
+This file covers every version published to npm. Dates are npm publication
+dates. The **Where** column names the main code or documentation areas, rather
+than every changed file. The **Why** column describes the problem each change
+addresses. Release contents were checked against the Git tags, commit diffs and
+npm version history.
+
+## [0.5.0](https://www.npmjs.com/package/renderpdf-js/v/0.5.0) — 2026-10-27
+
+| What changed                                                                                                                                            | Where                                                                                        | Why                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Render tested horizontal Latin, Cyrillic, Simplified and Traditional Chinese, and unvocalized Arabic HTML text, including RTL and mixed-direction runs. | `src/layout.ts`, `src/text.ts`, `src/page-bands.ts`, `src/pdf.ts`                            | Keep browser-measured placement and selectable PDF text when the document contains common non-Latin scripts.       |
+| Break programmatic CJK text without spaces and preserve logical extraction of ordinary Arabic ligatures.                                                | `src/document-page.ts`, `src/document.ts`                                                    | Make `createDocument()` wrap Chinese text and let readers copy unvocalized Arabic words in their original order.   |
+| Resolve equal collapsed-table border conflicts from the inline start side in both LTR and RTL tables.                                                   | `src/table-borders.ts`                                                                       | Match the browser's shared-border color when a table is right-to-left.                                             |
+| Add licensed Arabic and regional Chinese test fonts, browser/PDF pixel and extraction checks, and a language-support checklist.                         | `public/fonts/`, `tests/fixtures/multilingual.html`, `tests/browser/`, `README.md`, `API.md` | Make the supported scripts reproducible and document required font coverage and remaining language limits clearly. |
+
+The HTML renderer still requires exact registered TTF/OTF faces and embeds full
+font programs; large CJK fonts can increase PDF size. Vertical writing and
+automatic per-glyph font fallback remain unsupported. Arabic vowel marks render,
+but text extraction can move a mark around a ligature, so vocalized Arabic is
+outside the selectable-text guarantee. Other scripts have not been verified.
 
 ## [0.4.0](https://www.npmjs.com/package/renderpdf-js/v/0.4.0) — 2026-10-27
 

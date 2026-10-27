@@ -1,6 +1,6 @@
 {
   "name": "renderpdf-js",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Create PDFs from HTML, images or code, and merge or split existing PDFs.",
   "license": "MIT",
   "repository": {
@@ -40,6 +40,7 @@
     "dist/index.js",
     "dist/*.d.ts",
     "README.md",
+    "CHANGELOG.md",
     "API.md",
     "LICENSE",
     "assets/renderpdf-logo.png"

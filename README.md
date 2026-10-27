@@ -18,9 +18,9 @@ HTML exports use the browser's layout, keep text selectable and split content
 across pages. Document creation and PDF composition also work in Node.js,
 without a DOM.
 
-**Experimental.** HTML rendering is tested in Google Chrome; a basic export with
-Czech text also passed in Microsoft Edge. Firefox and Safari have not been
-verified. Supported HTML and CSS are [described below](#supported-scope).
+**Experimental.** HTML rendering is tested in Google Chrome; a basic export also
+passed in Microsoft Edge. Firefox and Safari have not been verified. Supported
+HTML and CSS are [described below](#supported-scope).
 
 ## Features
 
@@ -63,8 +63,8 @@ await pdf.download('invoice.pdf');
 
 Coordinates start at the top-left; text `y` is its baseline. Font sizes always use
 points. The document API works without a DOM. Built-in Helvetica, Times and Courier
-cover basic text; provide TTF/OTF bytes in `fonts` for Czech and other Unicode
-characters. Fonts accept bytes, bare base64 or a font data URL. A variable TTF is
+cover basic text; provide TTF/OTF bytes in `fonts` for characters outside their
+limited sets. Fonts accept bytes, bare base64 or a font data URL. A variable TTF is
 accepted only at its upright default axes and declared default weight. Fonts are
 prepared before drawing. After `toResult()`, the document is
 immutable.
@@ -139,6 +139,8 @@ data URL. Variable TTF files are supported only at their upright default axes an
 declared default weight; other axis values, system fonts, WOFF/WOFF2 and font
 collections remain unsupported. Disable optical sizing for a variable font with
 an `opsz` axis so browser and PDF outlines use the same instance.
+The selected face must contain every character in its text run; there is no
+automatic per-glyph fallback. A missing character fails with `MISSING_GLYPH`.
 
 Keep the source connected and unchanged during export. `registerFont({ ..., document:
 source.ownerDocument })` registers a face in an iframe's own `FontFaceSet`; the same
@@ -293,8 +295,26 @@ input fails explicitly instead of silently producing a whole-page screenshot.
 ## Supported scope
 
 HTML rendering supports static blocks, inline content, nonoverlapping Flexbox and
-Grid layouts, horizontal Latin text (including Czech diacritics), solid backgrounds,
+Grid layouts, horizontal text in the scripts listed below, solid backgrounds,
 rectangular borders and native tables with `rowspan` and `colspan`.
+
+### Text and languages
+
+Horizontal HTML text is verified in Chromium with selectable PDF text for these
+scripts when the registered TTF/OTF font covers the characters used:
+
+- [x] Latin script, including diacritics
+- [x] Cyrillic script
+- [x] Chinese Han text, including line breaks without spaces
+- [x] Arabic text without vowel marks, including right-to-left and mixed-direction runs
+
+Set the source text's `lang` and `dir` where needed, and register suitable font
+faces for each CSS `font-family`. Other scripts have not been verified. Vertical
+writing modes are unsupported. HTML export currently embeds complete font
+programs, so a large Chinese font can substantially increase PDF size; the
+programmatic document API subsets embedded fonts.
+Arabic vowel marks render, but PDF text extraction can move a mark around a
+ligature; vocalized Arabic is not yet covered by the selectable-text guarantee.
 
 PNG/JPEG resources can use data, blob, same-origin or CORS-readable URLs. External
 images may be fetched by the browser; documents are never sent to a conversion
@@ -343,10 +363,10 @@ possible header/body continuation boundary.
 
 ### Text and layout limits
 
-Default kerning, ligatures and combining marks are supported. Keep shaped words in
-one text node; cross-inline ligatures and zero-width fragments are unsupported.
-Complex scripts, bidirectional text, custom font features/variants, stretched
-faces, font-size adjustment, automatic hyphenation and soft hyphens are unsupported.
+Default kerning, ligatures and combining marks are supported. Keep shaped text runs
+in one text node; cross-inline ligatures and zero-width fragments are unsupported.
+Custom font features/variants, stretched faces, font-size adjustment, automatic
+hyphenation and soft hyphens are unsupported.
 Exact text appearance can vary between shaping engines.
 
 Arbitrary CSS stacking and overlapping paint are unsupported. Pause animations
@@ -393,13 +413,13 @@ for `npm run benchmark` and timing reports.
 
 To create a local package, create `artifacts/` if needed, then run
 `npm pack --pack-destination artifacts`. Only the library build, declarations,
-package metadata, README, license and logo are packaged. Keep private documents
+package metadata, README, API guide, changelog, license and logo are packaged. Keep private documents
 and generated files out of Git.
 
 ## License
 
 [MIT](https://github.com/MichalekJan93/renderPDF.js/blob/main/LICENSE).
 Third-party dependencies retain their own licenses: `utif2` uses MIT and `pako`
-retains MIT/Zlib notices. Noto Sans and Noto Serif test fonts retain the
+retains MIT/Zlib notices. Noto Sans, Noto Serif, Arabic and CJK test fonts retain the
 [SIL Open Font License](https://github.com/MichalekJan93/renderPDF.js/blob/main/public/fonts/README.md)
 and are not included in the npm package.

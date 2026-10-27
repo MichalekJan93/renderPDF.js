@@ -1,5 +1,14 @@
 import fontkit from '@pdf-lib/fontkit';
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, StandardFonts } from 'pdf-lib';
+import {
+  decodePDFRawStream,
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFRawStream,
+  StandardFonts,
+} from 'pdf-lib';
 import type { PDFFont, PDFRef } from 'pdf-lib';
 import type { FontSource, RenderPDFResult } from './api-types.js';
 import type {
@@ -21,6 +30,49 @@ import { createResult } from './result.js';
 
 /** Point sizes avoid the CSS reference-pixel conversion used by HTML layout. */
 const papers = { A4: [595.28, 841.89], A3: [841.89, 1190.55], Letter: [612, 792] } as const;
+
+/** PDF.js applies BiDi to extraction, so RTL ligature mappings must use visual cluster order.
+ * shortcut: vowel marks spanning a ligature still need cluster-aware CIDs for exact extraction.
+ */
+async function repairRTLUnicode(pdf: PDFDocument, fonts: ReadonlySet<PDFFont>): Promise<void> {
+  const rtl = /^[\p{Script=Arabic}\p{Script=Hebrew}]/u;
+  const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  for (const font of fonts) {
+    await font.embed();
+    const dictionary = pdf.context.lookup(font.ref, PDFDict);
+    const unicode = dictionary.get(PDFName.of('ToUnicode'));
+    if (!unicode) continue;
+    const stream = pdf.context.lookup(unicode);
+    if (!(stream instanceof PDFRawStream)) continue;
+    const cmap = new TextDecoder().decode(decodePDFRawStream(stream).decode());
+    let changed = false;
+    const corrected = cmap.replace(
+      /(<[0-9a-f]{4}>\s*)<([0-9a-f]+)>/gi,
+      (entry, source: string, hex: string) => {
+        if (hex.length % 4 !== 0) return entry;
+        const units = Array.from({ length: hex.length / 4 }, (_, index) =>
+          Number.parseInt(hex.slice(index * 4, index * 4 + 4), 16),
+        );
+        const clusters = Array.from(
+          graphemes.segment(String.fromCharCode(...units)),
+          (part) => part.segment,
+        );
+        if (clusters.length < 2 || !clusters.every((cluster) => rtl.test(cluster))) return entry;
+        changed = true;
+        const visual = clusters.reverse().join('');
+        const destination = Array.from({ length: visual.length }, (_, index) =>
+          visual.charCodeAt(index).toString(16).padStart(4, '0'),
+        ).join('');
+        return `${source}<${destination}>`;
+      },
+    );
+    if (changed)
+      dictionary.set(
+        PDFName.of('ToUnicode'),
+        pdf.context.register(pdf.context.flateStream(corrected)),
+      );
+  }
+}
 
 /** Resolve exact face identity consistently for drawing and measurement. */
 function fontKey(options: DocumentFontOptions = {}): string {
@@ -104,6 +156,7 @@ export class PDFBuilder {
   private constructor(
     private readonly pdf: PDFDocument,
     private readonly fonts: ReadonlyMap<string, PDFFont>,
+    private readonly customFonts: ReadonlySet<PDFFont>,
     private readonly fontNames: readonly string[],
     private readonly defaults: DocumentPageOptions,
     unit: DocumentUnit,
@@ -182,6 +235,7 @@ export class PDFBuilder {
     pdf.registerFontkit(fontkit);
     applyPDFMetadata(pdf, metadata);
     const fonts = new Map<string, PDFFont>();
+    const customFonts = new Set<PDFFont>();
     const names = new Set<string>();
     const families = [
       [
@@ -234,7 +288,9 @@ export class PDFBuilder {
           'Each font family, weight and style must be unique.',
         );
       try {
-        fonts.set(key, await pdf.embedFont(definition.data, { subset: true }));
+        const font = await pdf.embedFont(definition.data, { subset: true });
+        fonts.set(key, font);
+        customFonts.add(font);
         names.add(definition.family);
       } catch (cause) {
         throw new RenderPDFError('FONT_LOAD_FAILED', `Could not embed font ${definition.family}.`, {
@@ -243,7 +299,15 @@ export class PDFBuilder {
       }
     }
     throwIfAborted(signal);
-    return new PDFBuilder(pdf, fonts, Object.freeze([...names]), defaults, unit, signal);
+    return new PDFBuilder(
+      pdf,
+      fonts,
+      customFonts,
+      Object.freeze([...names]),
+      defaults,
+      unit,
+      signal,
+    );
   }
 
   /** Number of physical pages currently in the document. */
@@ -551,8 +615,8 @@ export class PDFBuilder {
     for (const page of this.pages) page.assertComplete();
     this.writeBookmarks();
     this.finished = true;
-    this.output = this.pdf
-      .save({ updateFieldAppearances: false })
+    this.output = repairRTLUnicode(this.pdf, this.customFonts)
+      .then(() => this.pdf.save({ updateFieldAppearances: false }))
       .then((bytes) => {
         throwIfAborted(this.signal);
         return createResult(bytes, this.pageCount, []);

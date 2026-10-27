@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { readFile } from 'node:fs/promises';
 import fontkit from '@pdf-lib/fontkit';
 import { PNG } from 'pngjs';
@@ -198,6 +198,29 @@ describe('native document drawing', () => {
     } finally {
       await task.destroy();
     }
+  });
+
+  it('wraps CJK text without spaces and keeps closing punctuation with the preceding glyph', async () => {
+    const { page, native, regular } = await fixture();
+    const content = '中文测试，换行继续';
+    vi.spyOn(regular, 'getCharacterSet').mockReturnValue([
+      ...regular.getCharacterSet(),
+      ...Array.from(content, (character) => character.codePointAt(0)!),
+    ]);
+    vi.spyOn(regular, 'encodeText').mockReturnValue(PDFHexString.of('0000'));
+    vi.spyOn(regular, 'widthOfTextAtSize').mockImplementation((value) => value.length * 10);
+    const drawn = vi.spyOn(native, 'drawText').mockImplementation(() => {});
+    page.drawText(content, { x: 10, y: 20, maxWidth: 30 });
+    expect(drawn.mock.calls.map(([value]) => value)).toEqual(['中文测', '试，换', '行继续']);
+    drawn.mockClear();
+    page.drawText('AB CD', { x: 10, y: 60, maxWidth: 30 });
+    expect(drawn.mock.calls.map(([value]) => value)).toEqual(['AB ', 'CD']);
+    drawn.mockClear();
+    page.drawText('中 hello', { x: 10, y: 100, maxWidth: 15 });
+    expect(drawn.mock.calls.map(([value]) => value)).toEqual(['中', 'hello']);
+    drawn.mockClear();
+    page.drawText('  中文', { x: 10, y: 140, maxWidth: 20 });
+    expect(drawn.mock.calls[0]?.[0]).toMatch(/^ {2}/);
   });
 
   it('writes native clipping, transforms, curves and transparent vector paint', async () => {

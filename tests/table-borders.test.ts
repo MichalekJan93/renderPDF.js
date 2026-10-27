@@ -46,8 +46,8 @@ describe('native collapsed border conflicts', () => {
     expect(resolveCollapsedBorders([edge({ style: 'none', width: 0 }), edge()])).toHaveLength(1);
   });
 
-  it('prefers a cell to an equal table border, then the top or left neighboring cell', () => {
-    // Color tie-breaking follows table element priority and LTR physical owner order.
+  it('prefers a cell to an equal table border, then the top or inline-start cell', () => {
+    // Color tie-breaking follows table element priority and table direction.
     const table = edge({ owner: 'table', color: 'table' });
     const upper = edge({ color: 'upper' });
     const lower = edge({ row: 20, color: 'lower' });
@@ -55,6 +55,7 @@ describe('native collapsed border conflicts', () => {
     const left = edge({ direction: 'vertical', row: 20, column: 0, color: 'left' });
     const right = edge({ direction: 'vertical', row: 0, column: 20, color: 'right' });
     expect(resolveCollapsedBorders([right, left])[0]!.color).toBe('left');
+    expect(resolveCollapsedBorders([right, left], 'rtl')[0]!.color).toBe('right');
   });
 
   it('splits a spanning side only where neighboring winners actually change', () => {

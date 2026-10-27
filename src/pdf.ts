@@ -129,7 +129,7 @@ interface TextResources {
   opacity: Map<number, PDFName>;
 }
 
-/** Paint shaped glyphs at measured word origins without scaling glyph outlines. */
+/** Paint shaped glyphs at measured run origins without scaling glyph outlines. */
 function drawLine(
   /** PDF page owning this complete measured line. */
   page: PDFPage,

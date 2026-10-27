@@ -25,7 +25,7 @@ export interface TableBorderCandidate {
   owner: 'cell' | 'table';
   /** Owner's top grid coordinate, used for the upper-cell tie break. */
   row: number;
-  /** Owner's left grid coordinate, used for the left-cell tie break in LTR tables. */
+  /** Owner's left grid coordinate, used for direction-dependent cell tie breaks. */
   column: number;
 }
 
@@ -39,13 +39,19 @@ export interface CollapsedTablePaint {
   repeatSafe: boolean;
 }
 
-/** Prefer hidden, then visible thickness, cell ownership, and the upper/left owner.
+/** Prefer hidden, then visible thickness, cell ownership, and the upper/start owner.
  * @param left First candidate on one shared grid interval.
  * @param right Second candidate on that interval or at a crossing.
+ * @param direction Table direction that selects the start-side cell.
  */
-function priority(left: TableBorderCandidate, right: TableBorderCandidate): number {
+function priority(
+  left: TableBorderCandidate,
+  right: TableBorderCandidate,
+  direction: 'ltr' | 'rtl',
+): number {
   const rank = (candidate: TableBorderCandidate) =>
     candidate.style === 'hidden' ? 2 : candidate.style === 'solid' && candidate.width > 0 ? 1 : 0;
+  const startColumn = direction === 'rtl' ? left.column - right.column : right.column - left.column;
   return (
     rank(left) - rank(right) ||
     left.width - right.width ||
@@ -53,15 +59,18 @@ function priority(left: TableBorderCandidate, right: TableBorderCandidate): numb
     (left.direction !== right.direction
       ? Number(left.direction === 'horizontal') - Number(right.direction === 'horizontal')
       : left.direction === 'vertical'
-        ? right.column - left.column || right.row - left.row
-        : right.row - left.row || right.column - left.column)
+        ? startColumn || right.row - left.row
+        : right.row - left.row || startColumn)
   );
 }
 
 /** Resolve each shared interval once, including partial edges beside rowspans and colspans.
  * @param candidates Authored borders positioned on browser-measured cell grid lines.
  */
-function resolveSegments(candidates: readonly TableBorderCandidate[]): TableBorderCandidate[] {
+function resolveSegments(
+  candidates: readonly TableBorderCandidate[],
+  direction: 'ltr' | 'rtl',
+): TableBorderCandidate[] {
   // Adjacent cells report the same grid line; grouping leaves their actual measured coordinate intact.
   const groups = new Map<string, TableBorderCandidate[]>();
   for (const candidate of candidates) {
@@ -108,7 +117,8 @@ function resolveSegments(candidates: readonly TableBorderCandidate[]): TableBord
       if (end - start <= EDGE_EPSILON) continue;
       // A valid table edge has at most its adjacent cells and the table competing at one coordinate.
       let winner: TableBorderCandidate | undefined;
-      for (const edge of active) if (!winner || priority(edge, winner) > 0) winner = edge;
+      for (const edge of active)
+        if (!winner || priority(edge, winner, direction) > 0) winner = edge;
       if (winner?.style === 'solid' && winner.width > 0) resolved.push({ ...winner, start, end });
     }
   }
@@ -136,7 +146,10 @@ function subtract(bounds: Bounds, occupied: Bounds): Bounds[] {
 /** Turn resolved centerlines into disjoint filled rectangles, never double-painting shared alpha.
  * @param segments Visible winners after shared-edge conflict resolution.
  */
-function paintSegments(segments: readonly TableBorderCandidate[]): BorderOperation[] {
+function paintSegments(
+  segments: readonly TableBorderCandidate[],
+  direction: 'ltr' | 'rtl',
+): BorderOperation[] {
   const operations: BorderOperation[] = [];
   // Index perpendicular centerlines once; endpoint lookup then examines only touching intervals.
   const lines = new Map<string, TableBorderCandidate[]>();
@@ -167,7 +180,7 @@ function paintSegments(segments: readonly TableBorderCandidate[]): BorderOperati
     return keys;
   };
   // Stronger strokes own intersections; equal-strength source order is stable and deterministic.
-  const ordered = [...segments].sort((left, right) => priority(right, left));
+  const ordered = [...segments].sort((left, right) => priority(right, left, direction));
   for (const edge of ordered) {
     // Extend each endpoint through the perpendicular stroke's outer half, closing table corners.
     const extension = (position: number) => {
@@ -224,8 +237,9 @@ function paintSegments(segments: readonly TableBorderCandidate[]): BorderOperati
  */
 export function resolveCollapsedBorders(
   candidates: readonly TableBorderCandidate[],
+  direction: 'ltr' | 'rtl' = 'ltr',
 ): BorderOperation[] {
-  return paintSegments(resolveSegments(candidates));
+  return paintSegments(resolveSegments(candidates, direction), direction);
 }
 
 /** Find native HTML table parts whose borders participate in one collapsed grid.
@@ -363,8 +377,9 @@ export function measureCollapsedTableBorders(
   };
   add(table, grid);
   cells.forEach((cell, index) => add(cell, rectangles[index]!));
-  const segments = resolveSegments(candidates);
-  const operations = paintSegments(segments);
+  const direction = computedStyle(table).direction === 'rtl' ? 'rtl' : 'ltr';
+  const segments = resolveSegments(candidates, direction);
+  const operations = paintSegments(segments, direction);
   const head = table.tHead?.getBoundingClientRect();
   if (!head || head.height <= 0) return { operations, repeatSafe: true };
   const headerBottom = head.bottom - origin.top;

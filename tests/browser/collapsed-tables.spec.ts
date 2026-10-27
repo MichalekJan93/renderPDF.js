@@ -159,6 +159,48 @@ test('collapsed shared borders preserve browser pixels, alpha, colspan and rowsp
   await writeFile(testInfo.outputPath('collapsed.pdf'), Buffer.from(evidence.bytes));
 });
 
+test('RTL collapsed table gives an equal shared border to the right cell', async ({ page }) => {
+  await loadFixture(page);
+  const source = page.locator('#collapsed');
+  const evidence = await page.evaluate(async () => {
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const root = document.querySelector<HTMLElement>('#collapsed')!;
+    root.innerHTML =
+      '<table dir="rtl" style="width:200px;table-layout:fixed;border-collapse:collapse;border:4px solid #142846">' +
+      '<tbody><tr>' +
+      '<td id="right-cell" style="padding:0;border:4px solid #c83131">RIGHT</td>' +
+      '<td style="padding:0;border:4px solid #2465bd">LEFT</td>' +
+      '</tr></tbody></table>';
+    await document.fonts.ready;
+    const origin = root.getBoundingClientRect();
+    const right = root.querySelector('#right-cell')!.getBoundingClientRect();
+    const result = await api.renderPDF(root, {
+      fonts: (window as unknown as { collapsedFonts: RegisteredFont[] }).collapsedFonts,
+      format: { width: 500, height: 200 },
+      margin: 20,
+    });
+    return {
+      bytes: Array.from(await result.toUint8Array()),
+      x: right.left - origin.left,
+      y: (right.top + right.bottom) / 2 - origin.top,
+    };
+  });
+  const browserImage = PNG.sync.read(await source.screenshot());
+  const pages = await inspect(page, evidence.bytes);
+  expect(pages).toHaveLength(1);
+  expect(pages[0]!.imagePaints).toBe(0);
+  const rendered = PNG.sync.read(Buffer.from(pages[0]!.png.split(',')[1]!, 'base64'));
+  expect(rendered.width).toBeGreaterThanOrEqual(20 + browserImage.width);
+  expect(rendered.height).toBeGreaterThanOrEqual(20 + browserImage.height);
+  const pdfImage = new PNG({ width: browserImage.width, height: browserImage.height });
+  PNG.bitblt(rendered, pdfImage, 20, 20, browserImage.width, browserImage.height, 0, 0);
+  const expected = pixel(browserImage, evidence.x, evidence.y);
+  const actual = pixel(pdfImage, evidence.x, evidence.y);
+  expect(expected.slice(0, 3)).toEqual([200, 49, 49]);
+  expect(actual).toEqual(expected);
+});
+
 test('collapsed tables retain repeated native headers and each complete selectable row', async ({
   page,
 }, testInfo) => {

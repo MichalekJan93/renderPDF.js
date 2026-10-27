@@ -49,8 +49,8 @@ image `y` is a top edge. Font sizes always use **points**, independent of `unit`
 `1 mm = 72/25.4 pt`; `1 px = 0.75 pt`. Rotation uses clockwise degrees.
 
 Helvetica, Times and Courier include regular, bold, italic and bold-italic faces.
-Their character sets are limited. For Czech and other Unicode text, provide an
-appropriate font program. Select an exact face using `font`, `fontWeight` and
+Their character sets are limited. For characters outside those sets, provide an
+appropriate TTF/OTF font program. Select an exact face using `font`, `fontWeight` and
 `fontStyle`; missing fonts and glyphs fail explicitly. Fonts are not substituted.
 Variable TTF programs use only their upright default axes and declared default
 weight; nondefault axes must be instantiated before use.
@@ -118,7 +118,7 @@ page.addTextField(
   'name',
   { x: 15, y: 50, width: 100, height: 12 },
   {
-    value: 'Český text',
+    value: 'Sample text',
     font: 'Report Sans',
     fontSize: 12,
   },

@@ -73,12 +73,11 @@ function resolveText(
     typeof value.text !== 'string' ||
     !Number.isFinite(value.height) ||
     value.height <= 0 ||
-    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value.text) ||
-    /[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u.test(value.text)
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value.text)
   ) {
     throw new RenderPDFError(
       'INVALID_OPTIONS',
-      'Page header/footer requires single-line Latin text and a finite positive reserved height.',
+      'Page header/footer requires single-line text and a finite positive reserved height.',
     );
   }
   // Defaults are copied now, so caller changes during font/image readiness cannot affect the PDF.

@@ -52,6 +52,61 @@ type FieldAppearanceOptions = NonNullable<Parameters<PDFTextField['addToPage']>[
 /** Fontkit may encode missing code points as .notdef; cache each face's real coverage. */
 const fontCharacters = new WeakMap<PDFFont, ReadonlySet<number>>();
 
+/** CJK text has line break opportunities between ideographs and syllables without spaces. */
+const cjkGrapheme = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const closingPunctuation = /^[\p{Pe}\p{Pf}，。、！？：；,.!?;:]/u;
+const openingPunctuation = /^[\p{Ps}\p{Pi}]/u;
+
+/** Preserve existing space-based wrapping for Latin text and add CJK break opportunities. */
+function wrapText(text: string, maxWidth: number, measure: (value: string) => number): string[] {
+  if (!cjkGrapheme.test(text)) return breakTextIntoLines(text, [' '], maxWidth, measure);
+  const lines: string[] = [];
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  for (const paragraph of text.replace(/\r\n?/g, '\n').split('\n')) {
+    if (!cjkGrapheme.test(paragraph)) {
+      lines.push(...breakTextIntoLines(paragraph, [' '], maxWidth, measure));
+      continue;
+    }
+    const units: string[] = [];
+    let pending = '';
+    for (const { segment } of segmenter.segment(paragraph)) {
+      if (cjkGrapheme.test(segment)) {
+        if (pending && !openingPunctuation.test(pending)) units.push(pending);
+        units.push(openingPunctuation.test(pending) ? pending + segment : segment);
+        pending = '';
+      } else if (closingPunctuation.test(segment)) {
+        if (pending) pending += segment;
+        else if (units.length) units[units.length - 1] += segment;
+        else pending = segment;
+      } else if (openingPunctuation.test(segment)) {
+        if (pending && !openingPunctuation.test(pending)) {
+          units.push(pending);
+          pending = '';
+        }
+        pending += segment;
+      } else if (segment === ' ') {
+        if (pending) {
+          units.push(pending + segment);
+          pending = '';
+        } else if (units.length) units[units.length - 1] += segment;
+        else pending = segment;
+      } else pending += segment;
+    }
+    if (pending) units.push(pending);
+    let line = '';
+    for (const unit of units) {
+      if (line.trim() && measure(line + unit) > maxWidth) {
+        lines.push(line.replace(/ +$/, ''));
+        line = unit.replace(/^ +/, '');
+        continue;
+      }
+      line += unit;
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
 /** Reject invalid values before appending operators or creating interactive fields. */
 function finite(value: number, name: string): void {
   if (typeof value !== 'number' || !Number.isFinite(value))
@@ -246,7 +301,7 @@ export class PDFPageBuilder {
       lines =
         options.maxWidth === undefined
           ? text.replace(/\r\n?/g, '\n').split('\n')
-          : breakTextIntoLines(text, [' '], options.maxWidth * this.scale, textWidth);
+          : wrapText(text, options.maxWidth * this.scale, textWidth);
     } catch (cause) {
       throw new RenderPDFError('MISSING_GLYPH', 'The selected font cannot encode this text.', {
         cause,

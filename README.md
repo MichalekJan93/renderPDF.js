@@ -34,6 +34,8 @@ verified. Supported HTML and CSS are [described below](#supported-scope).
 
 See the [API guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md)
 for methods, coordinate conventions and compatibility limits.
+The [changelog](https://github.com/MichalekJan93/renderPDF.js/blob/main/CHANGELOG.md)
+records what changed in each published version, where and why.
 
 ## Getting started
 

@@ -76,6 +76,20 @@ describe('prepared DevExtreme PDF facade', () => {
     expect(() => doc.setFont('Missing')).toThrow();
   });
 
+  it('accepts base64 for the default instance of a variable font', async () => {
+    // The public fixture has wght=400 and wdth=100 defaults, matching this facade's face.
+    const bytes = await readFile(new URL('../public/fonts/Roboto-Variable.ttf', import.meta.url));
+    const doc = await createJsPDFAdapter({
+      unit: 'pt',
+      fonts: [{ family: 'Variable Roboto', data: bytes.toString('base64') }],
+    });
+    doc.setFont('Variable Roboto').setFontSize(12);
+    doc.text('Příliš žluťoučký kůň', 10, 30);
+    const result = await doc.toResult();
+    expect(result.pageCount).toBe(1);
+    expect((await PDFDocument.load(await result.toUint8Array())).getPageCount()).toBe(1);
+  });
+
   it('normalizes DevExtreme color arguments and restores font/color/line state', async () => {
     const doc = await createJsPDFAdapter();
     expect(doc.internal.scaleFactor).toBeCloseTo(72 / 25.4, 10);

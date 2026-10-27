@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Default variable font instance</title>
+    <style>
+      body {
+        margin: 0;
+        background: white;
+      }
+      #source {
+        box-sizing: border-box;
+        width: 520px;
+        padding: 16px;
+        background: white;
+        color: #17202c;
+        font-family: 'Variable Probe';
+        font-size: 20px;
+        font-weight: 400;
+        font-style: normal;
+        font-synthesis: none;
+        font-optical-sizing: none;
+        line-height: 1.4;
+      }
+      p {
+        margin: 0 0 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="source">
+      <p>Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
+      <p>Vědecká zpráva měří čitelné znaky a zalomení textu.</p>
+    </div>
+    <script type="module">
+      import { registerFont, renderPDF } from '../../src/index.ts';
+
+      // This public OFL asset is independent of the SNP application's private inputs.
+      const response = await fetch('/fonts/Roboto-Variable.ttf');
+      if (!response.ok) throw new Error('Public variable font fixture could not be loaded.');
+      const font = await registerFont({
+        family: 'Variable Probe',
+        data: await response.arrayBuffer(),
+      });
+      // The fixture exposes only the reusable public renderer to the browser test.
+      window.variableFontProbe = {
+        /** Export the connected source with the font bytes used by browser layout. */
+        export: () => renderPDF(document.querySelector('#source'), { fonts: [font], margin: 24 }),
+      };
+    </script>
+  </body>
+</html>

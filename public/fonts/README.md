@@ -14,3 +14,9 @@ Its upstream SIL Open Font License is retained separately in `NotoSerif-OFL.txt`
 SHA-256 of the unmodified `NotoSerif-Regular.ttf` program:
 `c8f669ceb2c9c60ccf55198b305e08a997ffca79a38cc7eeb551e643cbe66505`.
 Fonts are excluded from the npm package allowlist.
+
+Roboto Variable is a separate public test fixture for its default `wght=400`,
+`wdth=100` instance. Source: [Google Fonts Roboto](https://github.com/google/fonts/blob/main/ofl/roboto/Roboto%5Bwdth,wght%5D.ttf).
+Its SIL Open Font License is preserved in `ROBOTO-OFL.txt`.
+SHA-256 of the unmodified `Roboto-Variable.ttf` program:
+`d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134`.

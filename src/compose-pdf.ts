@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFSignature } from 'pdf-lib';
 import type { PDFPage } from 'pdf-lib';
 import type { PDFMetadata, RenderPDFResult, RenderProgress } from './api-types.js';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
@@ -18,6 +18,8 @@ export interface PDFCompositionOptions {
   signal?: AbortSignal;
   /** Frozen stage-local counters, using preparing/resources/pages/saving/complete. */
   onProgress?: (progress: RenderProgress) => void;
+  /** Flatten ordinary prepared AcroForm fields before copying pages; signed and XFA files still fail. */
+  flattenForms?: boolean;
 }
 
 /** Capture mutable sources immediately; delayed readers retain only immutable owners. */
@@ -40,7 +42,10 @@ function resolveOptions(options: PDFCompositionOptions) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) {
     throw new RenderPDFError('INVALID_OPTIONS', 'PDF composition options must be an object.');
   }
-  const { signal, onProgress } = options;
+  const { signal, onProgress, flattenForms = false } = options;
+  if (typeof flattenForms !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'flattenForms must be a boolean.');
+  }
   if (onProgress !== undefined && typeof onProgress !== 'function') {
     throw new RenderPDFError('INVALID_OPTIONS', 'onProgress must be a function.');
   }
@@ -54,7 +59,7 @@ function resolveOptions(options: PDFCompositionOptions) {
     throw new RenderPDFError('INVALID_OPTIONS', 'signal must be an AbortSignal.');
   }
   throwIfAborted(signal);
-  return { signal, onProgress, metadata: resolveMetadata(options.metadata) };
+  return { signal, onProgress, flattenForms, metadata: resolveMetadata(options.metadata) };
 }
 
 /** Validate file size before allocating a copy or reading an immutable Blob. */
@@ -165,7 +170,7 @@ function inspectLinks(pdf: PDFDocument): InternalLink[][] {
 }
 
 /** Load strictly and leave encryption handling to the parser's rejecting default. */
-async function loadSource(bytes: Uint8Array, signal?: AbortSignal) {
+async function loadSource(bytes: Uint8Array, signal?: AbortSignal, flattenForms = false) {
   try {
     const pdf = await withCancellation(
       PDFDocument.load(bytes, { updateMetadata: false, throwOnInvalidObject: true }),
@@ -174,6 +179,38 @@ async function loadSource(bytes: Uint8Array, signal?: AbortSignal) {
     const count = pdf.getPageCount();
     if (count === 0 || count > MAX_PAGES) {
       throw new RenderPDFError('INVALID_SOURCE', 'Each source PDF must contain 1 to 1,000 pages.');
+    }
+    if (flattenForms) {
+      // Flatten only fields whose existing appearances can become ordinary page paint.
+      const form = pdf.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+      if (form?.has(PDFName.of('XFA'))) {
+        throw new RenderPDFError(
+          'INVALID_SOURCE',
+          'XFA forms cannot be flattened for composition.',
+        );
+      }
+      if (form?.lookupMaybe(PDFName.of('Fields'), PDFArray)?.size()) {
+        if (
+          pdf
+            .getForm()
+            .getFields()
+            .some((field) => field instanceof PDFSignature)
+        ) {
+          throw new RenderPDFError(
+            'INVALID_SOURCE',
+            'Signed PDF forms cannot be flattened for composition.',
+          );
+        }
+        pdf.getForm().flatten({ updateFieldAppearances: false });
+        // pdf-lib can retain deleted widget references after flattening.
+        for (const page of pdf.getPages()) {
+          const annotations = page.node.Annots();
+          if (!annotations) continue;
+          for (let index = annotations.size() - 1; index >= 0; index -= 1) {
+            if (!pdf.context.lookup(annotations.get(index))) annotations.remove(index);
+          }
+        }
+      }
     }
     return { pdf, links: inspectLinks(pdf) };
   } catch (cause) {
@@ -309,7 +346,7 @@ async function compose(
   split: boolean,
   options: PDFCompositionOptions,
 ): Promise<readonly RenderPDFResult[]> {
-  const { signal, onProgress, metadata } = resolveOptions(options);
+  const { signal, onProgress, flattenForms, metadata } = resolveOptions(options);
   if (selection !== undefined && (selection.length === 0 || selection.length > MAX_PAGES)) {
     throw new RenderPDFError(
       'INVALID_OPTIONS',
@@ -343,7 +380,7 @@ async function compose(
       if (totalBytes > MAX_TOTAL_BYTES) {
         throw new RenderPDFError('INVALID_SOURCE', 'Combined source PDFs must not exceed 256 MiB.');
       }
-      const donor = await loadSource(bytes, signal);
+      const donor = await loadSource(bytes, signal, flattenForms);
       plannedPages += chosen?.length ?? donor.pdf.getPageCount();
       if (plannedPages > MAX_PAGES) {
         throw new RenderPDFError(

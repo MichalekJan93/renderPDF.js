@@ -22,7 +22,7 @@ import type { PageGeometry, PDFMetadata, RegisteredFont, RenderProgress } from '
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
 import { applyPDFMetadata } from './export-options.js';
 import { nativeImageFormat } from './images.js';
-import type { PageText } from './page-bands.js';
+import type { PageText, PreparedPageBand } from './page-bands.js';
 import type { PageSlice } from './pagination.js';
 import { captureRaster } from './raster.js';
 import { PositionedFont } from './text.js';
@@ -37,12 +37,14 @@ export interface PDFWriteOptions {
   rasterScale?: number;
   /** Include extraction-only text inside a region already painted as a bitmap. */
   includeRasterText?: boolean;
+  /** Uniform source-to-paper ratio; page bands remain at their original physical size. */
+  sourceScale?: number;
   /** Stop before beginning subsequent asynchronous writing stages. */
   signal?: AbortSignal;
-  /** Copied plain text placed above the source, outside its page clip. */
-  header?: PageText;
-  /** Copied plain text placed below the source, outside its page clip. */
-  footer?: PageText;
+  /** Prepared text or HTML placed above the source, outside its page clip. */
+  header?: PreparedPageBand;
+  /** Prepared text or HTML placed below the source, outside its page clip. */
+  footer?: PreparedPageBand;
   /** Owned Unicode document properties, resolved before preparation begins. */
   metadata?: Readonly<PDFMetadata>;
   /** Internal awaited reporter; public application callbacks remain synchronous. */
@@ -141,6 +143,8 @@ function drawLine(
   geometry: PageGeometry,
   /** Resource caches owned by this one PDF page. */
   resources: TextResources,
+  /** Uniform source scale, with one for page text outside the source. */
+  sourceScale = 1,
 ): void {
   // Text rendering mode 3 preserves extraction without painting a second visible copy.
   const color = parseColor(text.color);
@@ -163,13 +167,14 @@ function drawLine(
   }
   page.pushOperators(
     beginText(),
-    setFontAndSize(fontName, text.fontSize * PX_TO_PT),
+    setFontAndSize(fontName, text.fontSize * sourceScale * PX_TO_PT),
     setTextRenderingMode(text.invisible ? TextRenderingMode.Invisible : TextRenderingMode.Fill),
   );
-  const scale = (text.fontSize * PX_TO_PT) / face.positioned.unitsPerEm;
-  const baseline = (geometry.height - geometry.margin.top - (text.baseline - start)) * PX_TO_PT;
+  const scale = (text.fontSize * sourceScale * PX_TO_PT) / face.positioned.unitsPerEm;
+  const baseline =
+    (geometry.height - geometry.margin.top - (text.baseline - start) * sourceScale) * PX_TO_PT;
   for (const run of text.runs) {
-    const x = (geometry.margin.left + run.x) * PX_TO_PT;
+    const x = (geometry.margin.left + run.x * sourceScale) * PX_TO_PT;
     for (const glyph of face.positioned.shape(run.text, text.kerning ?? true)) {
       page.pushOperators(
         setTextMatrix(1, 0, 0, 1, x + glyph.x * scale, baseline + glyph.y * scale),
@@ -232,6 +237,42 @@ function pageTextLine(
     color: 'rgb(0, 0, 0)',
     invisible: false,
   };
+}
+
+/** Expand one or three selectable page lines and reject text that would paint over another slot. */
+function pageBandLines(
+  /** Immutable prepared band; HTML is painted as an embedded PDF page instead. */
+  band: PreparedPageBand | undefined,
+  /** One-based page number after final pagination. */
+  pageNumber: number,
+  /** Physical page total used by placeholders. */
+  pageCount: number,
+  /** Band top edge in CSS pixels from the physical paper edge. */
+  top: number,
+  /** Original paper and printable width in CSS pixels. */
+  geometry: PageGeometry,
+  /** Embedded programs whose metrics match text drawing. */
+  faces: readonly EmbeddedFace[],
+): TextOperation[] {
+  if (!band || ('kind' in band && band.kind === 'html')) return [];
+  const settings = 'kind' in band ? band.lines : [band];
+  const lines = settings.map((line) =>
+    pageTextLine(line, pageNumber, pageCount, top, geometry, faces),
+  );
+  for (const [index, first] of lines.entries()) {
+    matchingFont(first, faces);
+    for (const second of lines.slice(index + 1)) {
+      if (
+        first.bounds.x < second.bounds.x + second.bounds.width - 0.01 &&
+        second.bounds.x < first.bounds.x + first.bounds.width - 0.01 &&
+        first.bounds.y < second.bounds.y + second.bounds.height - 0.01 &&
+        second.bounds.y < first.bounds.y + first.bounds.height - 0.01
+      ) {
+        throw new RenderPDFError('SOURCE_OVERFLOW', 'Page header/footer text slots overlap.');
+      }
+    }
+  }
+  return lines;
 }
 
 /** Expand a raster placement to whole CSS pixels without shifting visible content. */
@@ -303,7 +344,17 @@ export async function writePDF(
 ): Promise<PDFWriteResult> {
   try {
     throwIfAborted(options.signal);
-    if (snapshot.width > geometry.width - geometry.margin.left - geometry.margin.right) {
+    const sourceScale = options.sourceScale ?? 1;
+    if (!Number.isFinite(sourceScale) || sourceScale <= 0 || sourceScale > 1) {
+      throw new RenderPDFError(
+        'INVALID_OPTIONS',
+        'Source scale must be greater than zero and at most one.',
+      );
+    }
+    if (
+      snapshot.width * sourceScale >
+      geometry.width - geometry.margin.left - geometry.margin.right + 0.01
+    ) {
       throw new RenderPDFError('SOURCE_OVERFLOW', 'Source is wider than the PDF content area.');
     }
     // The PDF dependency stays behind this adapter and receives only explicit font programs.
@@ -311,12 +362,22 @@ export async function writePDF(
     throwIfAborted(options.signal);
     pdf.registerFontkit(fontkit);
     applyPDFMetadata(pdf, options.metadata);
-    // Resources count processed font/image/raster jobs, including references reusing an embedded image.
+    // Resources count processed fonts, local paint and prepared HTML forms.
     const resourceTotal = options.reportProgress
       ? fonts.length +
         snapshot.operations.filter(
           (operation) => operation.kind === 'image' || operation.kind === 'raster',
-        ).length
+        ).length +
+        Number(
+          options.header !== undefined &&
+            'kind' in options.header &&
+            options.header.kind === 'html',
+        ) +
+        Number(
+          options.footer !== undefined &&
+            'kind' in options.footer &&
+            options.footer.kind === 'html',
+        )
       : 0;
     let resourceCompleted = 0;
     if (options.reportProgress)
@@ -350,36 +411,52 @@ export async function writePDF(
         matchingFont(operation, faces);
       }
     }
-    // Validate every numbered band before raster capture or PDF page allocation begins.
-    const pageLines = slices.map((_, index) => {
-      const lines: TextOperation[] = [];
-      if (options.header) {
-        lines.push(
-          pageTextLine(
-            options.header,
-            index + 1,
-            slices.length,
-            geometry.margin.top,
-            geometry,
-            faces,
-          ),
-        );
-      }
-      if (options.footer) {
-        lines.push(
-          pageTextLine(
-            options.footer,
-            index + 1,
-            slices.length,
-            geometry.height - geometry.margin.bottom - options.footer.height,
-            geometry,
-            faces,
-          ),
-        );
-      }
-      for (const line of lines) matchingFont(line, faces);
-      return lines;
-    });
+    // Validate page-specific placeholders and slot overlap before allocating raster captures.
+    const pageLines = slices.map((_, index) => ({
+      header: pageBandLines(
+        options.header,
+        index + 1,
+        slices.length,
+        geometry.margin.top,
+        geometry,
+        faces,
+      ),
+      footer: pageBandLines(
+        options.footer,
+        index + 1,
+        slices.length,
+        geometry.height - geometry.margin.bottom - (options.footer?.height ?? 0),
+        geometry,
+        faces,
+      ),
+    }));
+    // An HTML band is rendered once as a vector/text PDF form and reused on every page.
+    const embeddedHeader =
+      options.header && 'kind' in options.header && options.header.kind === 'html'
+        ? (await pdf.embedPdf(options.header.bytes))[0]
+        : undefined;
+    if (embeddedHeader) {
+      resourceCompleted += 1;
+      if (options.reportProgress)
+        await options.reportProgress({
+          stage: 'resources',
+          completed: resourceCompleted,
+          total: resourceTotal,
+        });
+    }
+    const embeddedFooter =
+      options.footer && 'kind' in options.footer && options.footer.kind === 'html'
+        ? (await pdf.embedPdf(options.footer.bytes))[0]
+        : undefined;
+    if (embeddedFooter) {
+      resourceCompleted += 1;
+      if (options.reportProgress)
+        await options.reportProgress({
+          stage: 'resources',
+          completed: resourceCompleted,
+          total: resourceTotal,
+        });
+    }
     // Raster resources are captured exactly once per operation before ordered composition.
     const images = new Map<object, PDFImage>();
     // Repeated native image references share one embedded resource within the export.
@@ -460,7 +537,10 @@ export async function writePDF(
         for (const operation of operations) {
           // Skip off-page text entirely; clipping alone would leave duplicate extraction items.
           const bounds = operation.bounds;
-          if (bounds.y >= start + area.height - 0.01 || bounds.y + bounds.height <= start + 0.01)
+          if (
+            bounds.y >= start + area.height / sourceScale - 0.01 ||
+            bounds.y + bounds.height <= start + 0.01
+          )
             continue;
           if (operation.kind === 'text') {
             if (!operation.invisible || options.includeRasterText !== false) {
@@ -471,6 +551,7 @@ export async function writePDF(
                 start,
                 placementGeometry,
                 textResources,
+                sourceScale,
               );
             }
             continue;
@@ -479,10 +560,12 @@ export async function writePDF(
           const placement = operation.kind === 'raster' ? rasterPlacement(bounds) : bounds;
           // Convert top-left DOM coordinates to bottom-left PDF coordinates only here.
           const position = {
-            x: (geometry.margin.left + placement.x) * PX_TO_PT,
-            y: (geometry.height - area.y - (placement.y - start) - placement.height) * PX_TO_PT,
-            width: placement.width * PX_TO_PT,
-            height: placement.height * PX_TO_PT,
+            x: (geometry.margin.left + placement.x * sourceScale) * PX_TO_PT,
+            y:
+              (geometry.height - area.y - (placement.y - start + placement.height) * sourceScale) *
+              PX_TO_PT,
+            width: placement.width * sourceScale * PX_TO_PT,
+            height: placement.height * sourceScale * PX_TO_PT,
           };
           if (operation.kind === 'box') {
             // PDF strokes are centered; inset them to match the CSS outer border box.
@@ -496,13 +579,13 @@ export async function writePDF(
             });
             if (operation.borderWidth > 0) {
               // Native borders remain uniform solid strokes within the supported subset.
-              const inset = (operation.borderWidth * PX_TO_PT) / 2;
+              const inset = (operation.borderWidth * sourceScale * PX_TO_PT) / 2;
               page.drawRectangle({
                 x: position.x + inset,
                 y: position.y + inset,
                 width: position.width - inset * 2,
                 height: position.height - inset * 2,
-                borderWidth: operation.borderWidth * PX_TO_PT,
+                borderWidth: operation.borderWidth * sourceScale * PX_TO_PT,
                 borderColor: border.color,
                 borderOpacity: border.opacity,
               });
@@ -521,29 +604,43 @@ export async function writePDF(
       const repeatedHeight =
         slice.headerHeight ?? (slice.header ? slice.header.bodyStart - slice.header.bounds.y : 0);
       // Stream order follows the visual reading order, including selectable repeated text.
-      if (options.header) {
-        const line = pageLines[pageIndex]![0]!;
+      for (const line of pageLines[pageIndex]!.header) {
         drawLine(page, line, matchingFont(line, faces), 0, geometry, textResources);
+      }
+      if (embeddedHeader) {
+        page.drawPage(embeddedHeader, {
+          x: geometry.margin.left * PX_TO_PT,
+          y: (geometry.height - geometry.margin.top - options.header!.height) * PX_TO_PT,
+          width: (geometry.width - geometry.margin.left - geometry.margin.right) * PX_TO_PT,
+          height: options.header!.height * PX_TO_PT,
+        });
       }
       if (slice.header) {
         // Ancestor backgrounds are clipped to this table's width and cannot obscure source rows.
         paint(slice.header.operations, slice.header.bounds.y, {
-          x: geometry.margin.left + slice.header.bounds.x,
+          x: geometry.margin.left + slice.header.bounds.x * sourceScale,
           y: contentTop,
-          width: slice.header.bounds.width,
-          height: repeatedHeight,
+          width: slice.header.bounds.width * sourceScale,
+          height: repeatedHeight * sourceScale,
         });
       }
       // The source interval moves down only on a table continuation page; its coordinates stay intact.
       paint(snapshot.operations, slice.start, {
         x: geometry.margin.left,
-        y: contentTop + repeatedHeight,
+        y: contentTop + repeatedHeight * sourceScale,
         width: geometry.width - geometry.margin.left - geometry.margin.right,
-        height: slice.end - slice.start,
+        height: (slice.end - slice.start) * sourceScale,
       });
-      if (options.footer) {
-        const line = pageLines[pageIndex]!.at(-1)!;
+      for (const line of pageLines[pageIndex]!.footer) {
         drawLine(page, line, matchingFont(line, faces), 0, geometry, textResources);
+      }
+      if (embeddedFooter) {
+        page.drawPage(embeddedFooter, {
+          x: geometry.margin.left * PX_TO_PT,
+          y: geometry.margin.bottom * PX_TO_PT,
+          width: (geometry.width - geometry.margin.left - geometry.margin.right) * PX_TO_PT,
+          height: options.footer!.height * PX_TO_PT,
+        });
       }
       if (options.reportProgress)
         await options.reportProgress({

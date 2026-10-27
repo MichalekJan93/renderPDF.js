@@ -16,7 +16,7 @@ import type { PDFSource } from './compose-pdf.js';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
 import { PDFPageBuilder } from './document-page.js';
 import { applyPDFMetadata, resolveMetadata } from './export-options.js';
-import { assertStaticSfnt } from './fonts.js';
+import { copyFontBytes, inspectFontProgram } from './fonts.js';
 import { createResult } from './result.js';
 
 /** Point sizes avoid the CSS reference-pixel conversion used by HTML layout. */
@@ -146,7 +146,7 @@ export class PDFBuilder {
     if (options.fonts !== undefined && !Array.isArray(options.fonts)) {
       throw new RenderPDFError(
         'INVALID_OPTIONS',
-        'Document fonts must be an array of static font sources.',
+        'Document fonts must be an array of font sources.',
       );
     }
     const definitions: FontSource[] = (options.fonts ?? []).map((source) => {
@@ -154,17 +154,16 @@ export class PDFBuilder {
         !source ||
         typeof source.family !== 'string' ||
         !source.family.trim() ||
-        (!(source.data instanceof Uint8Array) && !(source.data instanceof ArrayBuffer))
+        source.data === undefined
       ) {
         throw new RenderPDFError(
           'INVALID_OPTIONS',
-          'Provide a font family and static TTF/OTF bytes.',
+          'Provide a font family and TTF/OTF bytes or base64.',
         );
       }
-      const bytes = Uint8Array.from(
-        source.data instanceof Uint8Array ? source.data : new Uint8Array(source.data),
-      );
-      assertStaticSfnt(bytes);
+      const bytes = copyFontBytes(source.data);
+      if (bytes.byteLength === 0)
+        throw new RenderPDFError('INVALID_OPTIONS', 'Font bytes must not be empty.');
       const definition = {
         family: source.family.trim(),
         data: bytes,
@@ -176,6 +175,7 @@ export class PDFBuilder {
         fontWeight: definition.weight,
         fontStyle: definition.style,
       });
+      inspectFontProgram(bytes, definition.weight, definition.style);
       return definition;
     });
     const pdf = await PDFDocument.create();

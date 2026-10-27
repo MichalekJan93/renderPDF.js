@@ -18,8 +18,9 @@ HTML exports use the browser's layout, keep text selectable and split content
 across pages. Document creation and PDF composition also work in Node.js,
 without a DOM.
 
-**Experimental.** HTML rendering is verified in Chromium; Firefox and Safari have
-not been verified. Supported HTML and CSS are [described below](#supported-scope).
+**Experimental.** HTML rendering is tested in Google Chrome; a basic export with
+Czech text also passed in Microsoft Edge. Firefox and Safari have not been
+verified. Supported HTML and CSS are [described below](#supported-scope).
 
 ## Features
 
@@ -60,8 +61,10 @@ await pdf.download('invoice.pdf');
 
 Coordinates start at the top-left; text `y` is its baseline. Font sizes always use
 points. The document API works without a DOM. Built-in Helvetica, Times and Courier
-cover basic text; provide static TTF/OTF bytes in `fonts` for Czech and other Unicode
-characters. Fonts are prepared before drawing. After `toResult()`, the document is
+cover basic text; provide TTF/OTF bytes in `fonts` for Czech and other Unicode
+characters. Fonts accept bytes, bare base64 or a font data URL. A variable TTF is
+accepted only at its upright default axes and declared default weight. Fonts are
+prepared before drawing. After `toResult()`, the document is
 immutable.
 
 Use `pdf.toUint8Array()` or `pdf.toBlob()` outside the browser; `download()` is a
@@ -72,7 +75,7 @@ browser action.
 ```ts
 import { mergePDFs, extractPDFPages, splitPDF } from 'renderpdf-js';
 
-const combined = await mergePDFs([firstFile, secondFile]);
+const combined = await mergePDFs([firstFile, secondFile], { flattenForms: true });
 await combined.download('combined.pdf');
 
 const selected = await extractPDFPages(firstFile, [3, 1]);
@@ -81,8 +84,10 @@ const individualPages = await splitPDF(firstFile);
 
 Inputs can be `File`/`Blob`, `ArrayBuffer`, `Uint8Array` or a completed export result.
 Page numbers are one-based. Pages retain their native text, vectors, sizes and
-rotation. Flatten interactive forms before importing them; encrypted PDFs and
-unsupported destinations fail explicitly. Document-level bookmarks, signatures and
+rotation. `flattenForms: true` turns ordinary prepared AcroForm appearances into
+page paint before composition; the default still rejects interactive fields. XFA,
+signed, encrypted PDFs and unsupported destinations fail explicitly. Flattening
+removes interactivity. Document-level bookmarks, signatures and
 metadata are not merged. See the [composition limits](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md#pdf-composition).
 
 ## DevExtreme integration
@@ -124,16 +129,48 @@ const pdf = await renderPDF(source, {
 await pdf.download('invoice.pdf');
 ```
 
-Register every font family, weight and style used by the source, including bold
-and italic faces. For example, add `weight: 700` when registering a bold font.
-The first computed CSS font family must match a registered face. Static TTF/OTF
-files are required; system fonts, variable fonts, WOFF/WOFF2 and font collections
-are unsupported.
+Register every font family and style used by the source, including italic faces.
+Available static weights follow CSS nearest-face matching: a requested weight of
+`600` can select a registered `700` face. The first computed CSS font family must
+still match a registered family. TTF/OTF data can be bytes, bare base64 or a font
+data URL. Variable TTF files are supported only at their upright default axes and
+declared default weight; other axis values, system fonts, WOFF/WOFF2 and font
+collections remain unsupported. Disable optical sizing for a variable font with
+an `opsz` axis so browser and PDF outlines use the same instance.
 
-Keep the source connected to the document and unchanged during export. Its width
-and wrapping are preserved, so it must already fit the page's content width:
-about **745.7 CSS pixels** for A4 with the default margins. Oversized HTML is not
-automatically scaled down.
+Keep the source connected and unchanged during export. `registerFont({ ..., document:
+source.ownerDocument })` registers a face in an iframe's own `FontFaceSet`; the same
+handles belong in that source's `renderPDF` options. The default preserves source
+width and fails when it exceeds the page's content width (about **745.7 CSS
+pixels** for A4 with default margins). `fit: 'width'` instead keeps the browser's
+original wrapping and uniformly reduces PDF paint and page mapping.
+
+### Convert an HTML string
+
+```ts
+import { renderHTML } from 'renderpdf-js';
+
+const pdf = await renderHTML(fullHtmlDocument, {
+  fonts: [{ family: 'Document Sans', data: fontBytes }],
+  sourceWidth: 1200,
+  fit: 'width',
+  orientation: 'auto',
+  fontFallback: 'Document Sans',
+  header: { height: 36, html: '<div style="font-family:Document Sans">Account statement</div>' },
+  footer: { height: 28, left: 'Printed by: Example', right: 'Page {pageNumber}/{pageCount}' },
+});
+```
+
+The default `isolation: 'iframe'` accepts a full HTML document. Use
+`isolation: 'shadow'` for a fragment. Both run in a temporary sandboxed iframe;
+their DOM and font faces are released after export. `sourceWidth` is the browser
+layout width before PDF fitting. `fontFallback` explicitly lays out copied
+elements whose first computed family is unregistered and reports
+`FONT_SUBSTITUTED`; it changes their appearance, so it cannot preserve an
+unprovided system font such as Tahoma. HTML header/footer fragments live in
+separate shadow roots: include their CSS inline or in each fragment. Scripts,
+frames, active attributes and refresh metadata are rejected. Ordinary image and
+CSS URLs may still trigger browser requests.
 
 ## Standalone image files
 
@@ -167,7 +204,7 @@ Both conversion functions accept these settings:
 | Option        | Default                 | Description                                                           |
 | ------------- | ----------------------- | --------------------------------------------------------------------- |
 | `format`      | `'A4'`                  | `'A4'`, `'A3'`, `'Letter'` or `{ width, height }`.                    |
-| `orientation` | `'portrait'`            | `'portrait'` or `'landscape'`.                                        |
+| `orientation` | `'portrait'`            | `'portrait'` or `'landscape'`; HTML also accepts `'auto'`.            |
 | `margin`      | `24`                    | One value or `{ top, right, bottom, left }`.                          |
 | `metadata`    | Title: `'RenderPDF.js'` | Unicode `title`, `author`, `subject` and `keywords` (a string array). |
 | `onProgress`  | —                       | Receives `{ stage, completed, total }`.                               |
@@ -181,36 +218,41 @@ HTML exports also accept:
 | Option               | Default  | Description                                                                            |
 | -------------------- | -------- | -------------------------------------------------------------------------------------- |
 | `fonts`              | Required | Registered faces used by the source and page text.                                     |
+| `fit`                | `'none'` | `'width'` uniformly shrinks wide HTML after browser layout.                            |
 | `pageBreak`          | `'css'`  | Honor supported CSS breaks, or use `'auto'` for geometry alone.                        |
 | `repeatTableHeaders` | `false`  | Repeat native `thead` groups on continuation pages.                                    |
-| `header`, `footer`   | —        | One plain text line in a reserved area on every page.                                  |
+| `header`, `footer`   | —        | One line, left/center/right text, or connected HTML repeated on every page.            |
 | `fallback`           | `'auto'` | Rasterize supported local effects; `'strict'` requires explicit `data-raster` regions. |
 | `rasterScale`        | `2`      | Raster pixels per CSS pixel.                                                           |
+| `verifySource`       | `'full'` | `'mutations'` skips CSSOM fingerprints and can miss stylesheet changes.                |
 | `onWarning`          | —        | Receives export warnings.                                                              |
 
-### Repeated table headers and page text
+### Repeated table headers, headers and footers
 
 ```ts
 const pdf = await renderPDF(source, {
   fonts: [regular],
   repeatTableHeaders: true,
   header: { text: 'Account statement', height: 32 },
-  footer: {
-    text: 'Page {pageNumber} of {pageCount}',
-    height: 28,
-    fontSize: 11,
-    align: 'right',
-  },
+  footer: { height: 28, left: 'Printed by: Example', right: 'Page {pageNumber} of {pageCount}' },
 });
 await pdf.download('statement.pdf');
 ```
 
 Header and footer `height` is required and reserves space **in addition to** the
-outer margins. Each accepts one plain Latin text line, including Czech diacritics,
-with `{pageNumber}` and `{pageCount}` placeholders. Text stays selectable and does
-not wrap. `fontSize` defaults to `12`, `align` to `'left'`, and `font` to the first
-face in `fonts`. Alignment can also be `'center'` or `'right'`. Text that does not
-fit fails explicitly. HTML page templates and per-page callbacks are unsupported.
+outer margins. Existing `{ text, height, align? }` usage still works. To draw
+independent selectable text, supply `left`, `center` and/or `right`; each uses the
+shared `font` (first registered face by default) and `fontSize` (default `12`).
+`{pageNumber}` and `{pageCount}` expand after pagination. Lines cannot wrap or
+overlap; a band too small for its content fails explicitly.
+
+For custom HTML, connect a separate `HTMLElement` in the source's document and
+pass `{ element, height }`. It must be outside the main source subtree and fit the
+printable width and reserved height. The renderer measures this element through
+the same supported HTML pipeline once, then repeats its PDF text and paint on each
+page. `renderHTML` also accepts `{ html, height }` strings for bands as shown above.
+HTML bands are static across pages; use a text slot for page-number placeholders.
+Custom CSS remains subject to the [supported scope](#supported-scope).
 
 ### Export progress and document properties
 
@@ -307,7 +349,10 @@ Exact text appearance can vary between shaping engines.
 
 Arbitrary CSS stacking and overlapping paint are unsupported. Pause animations
 and keep source styles, geometry and registered fonts stable during export.
-Changes to the source fail with `SOURCE_CHANGED`.
+Changes to the source fail with `SOURCE_CHANGED`. `verifySource: 'mutations'` is an
+explicit faster mode that checks observed DOM/stylesheet mutations but can miss
+CSSOM edits and computed-style-only changes; it emits
+`SOURCE_VERIFICATION_REDUCED`.
 
 ### Image format limits
 

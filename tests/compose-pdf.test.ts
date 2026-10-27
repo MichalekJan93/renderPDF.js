@@ -212,9 +212,15 @@ describe('native PDF composition', () => {
     const source = await PDFDocument.load(await fixture());
     const field = source.getForm().createTextField('name');
     field.addToPage(source.getPage(0), { x: 10, y: 20, width: 80, height: 20 });
+    field.setText('Ready');
     await expect(mergePDFs([await source.save()])).rejects.toMatchObject({
       code: 'INVALID_SOURCE',
     });
+    // Opt-in flattening preserves a prepared appearance as native, searchable page content.
+    const flattened = await mergePDFs([await source.save()], { flattenForms: true });
+    const flattenedBytes = await flattened.toUint8Array();
+    expect((await inspect(flattenedBytes))[0]!.text).toContain('Ready');
+    expect((await PDFDocument.load(flattenedBytes)).getForm().getFields()).toHaveLength(0);
     source.getForm().flatten();
     // pdf-lib can leave a deleted widget reference; this fixture has no other annotations.
     source.getPage(0).node.delete(PDFName.of('Annots'));
@@ -234,6 +240,11 @@ describe('native PDF composition', () => {
     await expect(mergePDFs([await encrypted.save()])).rejects.toMatchObject({
       code: 'INVALID_SOURCE',
       message: expect.stringContaining('encrypted'),
+    });
+    await expect(
+      mergePDFs([await fixture()], { flattenForms: 'yes' } as never),
+    ).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
     });
   });
 

@@ -1,6 +1,8 @@
 import { toPng } from 'html-to-image';
 import type { RegisteredFont } from './api-types.js';
 import { RenderPDFError } from './diagnostics.js';
+import { computedStyle, isHtmlElement, isHtmlTag } from './dom.js';
+import { resolveRegisteredFont } from './fonts.js';
 
 /** Bounds the memory of the experiment's temporary canvas, in physical pixels. */
 const MAX_RASTER_PIXELS = 16_777_216;
@@ -68,7 +70,7 @@ function assertSelfContained(
   // Include the region itself when checking resources and context-dependent effects.
   const descendants = [element, ...element.querySelectorAll('*')];
   for (const descendant of descendants) {
-    if (!(descendant instanceof HTMLElement)) {
+    if (!isHtmlElement(descendant)) {
       throw new RenderPDFError(
         'RASTER_FAILED',
         'Raster capture supports HTML subtrees only; inline SVG needs a separate experiment.',
@@ -96,7 +98,7 @@ function assertSelfContained(
     }
 
     // Use the same computed declarations that html-to-image copies into its clone.
-    const style = getComputedStyle(descendant);
+    const style = computedStyle(descendant);
     assertInlineResources(style);
     if (style.mixBlendMode !== 'normal' || style.backdropFilter !== 'none') {
       throw new RenderPDFError(
@@ -162,7 +164,7 @@ function assertSelfContained(
     // Generated content has separate geometry and no extraction counterpart in this experiment.
     for (const pseudo of ['::before', '::after']) {
       // Pseudo-elements with even empty content can paint backgrounds or borders.
-      const content = getComputedStyle(descendant, pseudo).content;
+      const content = computedStyle(descendant, pseudo).content;
       if (content !== 'none' && content !== 'normal') {
         throw new RenderPDFError(
           'RASTER_FAILED',
@@ -171,7 +173,7 @@ function assertSelfContained(
       }
     }
 
-    if (descendant instanceof HTMLImageElement) {
+    if (isHtmlTag(descendant, 'img')) {
       if (descendant.srcset || !INLINE_BITMAP.test(descendant.currentSrc || descendant.src)) {
         throw new RenderPDFError(
           'RASTER_FAILED',
@@ -198,25 +200,8 @@ function assertSelfContained(
           'Raster capture requires a serializable computed font shorthand to preserve exact font sizes.',
         );
       }
-      // The first CSS family must match an explicit font; browser fallbacks cannot be embedded.
-      const family = style.fontFamily
-        .split(',')[0]
-        ?.trim()
-        .replace(/^["']|["']$/g, '');
-      if (
-        !fonts.some(
-          /** Candidate registered face used instead of operating-system font discovery. */
-          (font) =>
-            font.family.toLowerCase() === family?.toLowerCase() &&
-            font.weight === Number(style.fontWeight) &&
-            font.style === style.fontStyle,
-        )
-      ) {
-        throw new RenderPDFError(
-          'RASTER_FAILED',
-          'Raster capture text requires an explicitly registered matching font face.',
-        );
-      }
+      // One shared resolver keeps native and raster text on the same browser-selected face.
+      resolveRegisteredFont(style, fonts);
     }
 
     // Ignore hidden descendants, whose zero geometry cannot escape the capture.
@@ -257,10 +242,10 @@ export async function captureRaster(
     y: number;
   } = { x: 0, y: 0 },
 ): Promise<Uint8Array> {
-  if (!element.isConnected || element.ownerDocument !== document) {
+  if (!element.isConnected || !element.ownerDocument.defaultView) {
     throw new RenderPDFError(
       'RASTER_FAILED',
-      'Raster capture requires a connected element in the current document.',
+      'Raster capture requires a connected element in a live document.',
     );
   }
   if (!Number.isFinite(scale) || scale <= 0) {
@@ -279,7 +264,7 @@ export async function captureRaster(
     );
   }
 
-  await document.fonts.ready;
+  await element.ownerDocument.fonts.ready;
   // Match the browser's measured border box and preserve fractional CSS dimensions.
   const { width, height } = element.getBoundingClientRect();
   // Transparent padding carries a fractional source origin within an integer-aligned image.
@@ -310,7 +295,7 @@ export async function captureRaster(
   // Upstream behavior: https://github.com/bubkoo/html-to-image/blob/v1.11.13/src/clone-node.ts#L139-L143
   const includeStyleProperties = [
     'font',
-    ...Array.from(getComputedStyle(element)).filter(
+    ...Array.from(computedStyle(element)).filter(
       /** Preserve every other computed longhand after setting the exact font shorthand. */
       (property) => property !== 'font-size',
     ),

@@ -45,6 +45,24 @@ describe('reserved page text areas', () => {
     });
   });
 
+  it('resolves independent left and right text without changing the shared reserved height', () => {
+    const options: RenderPDFOptions = {
+      fonts,
+      margin: 20,
+      footer: { height: 26, left: 'Printed by: Example', right: 'Page {pageNumber}/{pageCount}' },
+    };
+    const bands = resolvePageBands(resolvePage(options), options);
+    expect(bands.footer).toMatchObject({
+      kind: 'slots',
+      height: 26,
+      lines: [
+        { text: 'Printed by: Example', align: 'left' },
+        { text: 'Page {pageNumber}/{pageCount}', align: 'right' },
+      ],
+    });
+    expect(bands.content.margin.bottom).toBe(46);
+  });
+
   it('rejects malformed bands and an exhausted content area before DOM preparation', () => {
     const invalid: unknown[] = [
       null,
@@ -61,6 +79,8 @@ describe('reserved page text areas', () => {
       { text: 'Title', height: 30, fontSize: Number.NaN },
       { text: 'Title', height: 30, align: 'diagonal' },
       { text: 'Title', height: 30, font: { ...fonts[0] } },
+      { height: 30 },
+      { height: 30, left: 12 },
     ];
     for (const header of invalid) {
       const options = { fonts, header } as RenderPDFOptions;

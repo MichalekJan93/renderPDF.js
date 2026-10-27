@@ -17,7 +17,9 @@ export interface FontSource {
   /** CSS family to register in the current document. */
   family: string;
   /** Complete TTF/OTF program available to the browser and PDF adapter. */
-  data: Uint8Array | ArrayBuffer;
+  data: Uint8Array | ArrayBuffer | string;
+  /** Browser document that owns the face; defaults to the current document. */
+  document?: Document;
   /** Static face weight, defaulting to 400. */
   weight?: number;
   /** Static face style, defaulting to normal. */
@@ -68,6 +70,33 @@ export interface PageTextOptions {
   align?: 'left' | 'center' | 'right';
 }
 
+/** Independent selectable text at up to three positions in one reserved page band. */
+export interface PageTextSlotsOptions {
+  /** Reserved height in CSS pixels, in addition to the page's outer margins. */
+  height: number;
+  /** Text aligned to the left edge; page placeholders expand after pagination. */
+  left?: string;
+  /** Text centered within the printable width. */
+  center?: string;
+  /** Text aligned to the right edge. */
+  right?: string;
+  /** Exact face included in fonts; defaults to its first registered face. */
+  font?: RegisteredFont;
+  /** Text size in CSS pixels, defaulting to 12. */
+  fontSize?: number;
+}
+
+/** Browser-rendered HTML repeated as one PDF form on every physical page. */
+export interface PageHTMLBandOptions {
+  /** Reserved height in CSS pixels, in addition to the page's outer margins. */
+  height: number;
+  /** Connected content in the source document, measured without changing caller-owned DOM. */
+  element: HTMLElement;
+}
+
+/** Legacy single line, positioned text slots, or connected HTML page decoration. */
+export type PageBandOptions = PageTextOptions | PageTextSlotsOptions | PageHTMLBandOptions;
+
 /** Document properties stored in the PDF, independent of visible page content. */
 export interface PDFMetadata {
   /** Human-readable document title; defaults to RenderPDF.js when omitted. */
@@ -111,21 +140,27 @@ export interface PDFPageOptions {
 }
 
 /** Small supported API surface; unsupported layout fails explicitly. */
-export interface RenderPDFOptions extends PDFPageOptions {
+export interface RenderPDFOptions extends Omit<PDFPageOptions, 'orientation'> {
+  /** Select paper orientation after browser measurement, or retain explicit portrait/landscape. */
+  orientation?: 'portrait' | 'landscape' | 'auto';
+  /** Keep source size by default; width fits a wider measured source uniformly on each page. */
+  fit?: 'none' | 'width';
   /** Explicit registered faces used by the supplied source; no implicit font substitution. */
   fonts: readonly RegisteredFont[];
   /** Physical pixels per CSS pixel in selected local raster regions, defaulting to 2. */
   rasterScale?: number;
   /** Automatically rasterize safe local effects (default auto); strict requires explicit data-raster. */
   fallback?: 'auto' | 'strict';
+  /** Full CSS and geometry checks are the default; mutations is a faster, weaker opt-in. */
+  verifySource?: 'full' | 'mutations';
   /** Honor supported CSS page breaks (default css), or use geometry-only automatic cuts. */
   pageBreak?: 'auto' | 'css';
   /** Repeat native THEAD groups on table continuation pages; defaults to false. */
   repeatTableHeaders?: boolean;
-  /** Plain text vertically centered in a reserved area above the source on every page. */
-  header?: PageTextOptions;
-  /** Plain text vertically centered in a reserved area below the source on every page. */
-  footer?: PageTextOptions;
+  /** Repeated text or connected HTML above the source on every page. */
+  header?: PageBandOptions;
+  /** Repeated text or connected HTML below the source on every page. */
+  footer?: PageBandOptions;
   /** Unicode document properties; all supplied values are copied before asynchronous preparation. */
   metadata?: PDFMetadata;
   /** Stop preparation and subsequent rendering stages without producing a partial PDF. */

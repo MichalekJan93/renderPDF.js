@@ -64,7 +64,14 @@ export function resolvePage(
   if (!options || !Array.isArray(options.fonts) || options.fonts.length === 0) {
     throw new RenderPDFError('INVALID_OPTIONS', 'Provide at least one explicitly registered font.');
   }
-  const geometry = resolvePageGeometry(options);
+  // HTML can choose paper orientation after measuring its source; preflight uses portrait.
+  const geometry = resolvePageGeometry({
+    ...options,
+    orientation: options.orientation === 'auto' ? 'portrait' : (options.orientation ?? 'portrait'),
+  });
+  if (options.fit !== undefined && options.fit !== 'none' && options.fit !== 'width') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'fit must be none or width.');
+  }
   if (
     options.rasterScale !== undefined &&
     (!Number.isFinite(options.rasterScale) || options.rasterScale <= 0)

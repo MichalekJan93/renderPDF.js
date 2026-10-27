@@ -1,7 +1,8 @@
 # Document API
 
-RenderPDF.js provides three ways to create a PDF: `renderPDF()` for supported HTML,
-`imageToPDF()` for image files, and `createDocument()` for programmatic drawing.
+RenderPDF.js provides four ways to create a PDF: `renderPDF()` for connected HTML,
+`renderHTML()` for isolated HTML strings, `imageToPDF()` for image files, and
+`createDocument()` for programmatic drawing.
 All return or finalize into the same immutable `RenderPDFResult` with `pageCount`,
 `warnings`, `toBlob()`, `toUint8Array()` and `download()`.
 
@@ -34,14 +35,14 @@ measurement are synchronous afterwards, except `drawImage()` and `appendPDF()`,
 which must be awaited. The document API does not require a browser or font
 registration in the DOM. Use `registerFont()` separately for HTML exports.
 
-| Setting       | Default                 | Meaning                                                                       |
-| ------------- | ----------------------- | ----------------------------------------------------------------------------- |
-| `unit`        | `'pt'`                  | `'pt'`, `'mm'` or `'px'` for coordinates and dimensions.                      |
-| `format`      | `'A4'`                  | `'A4'`, `'A3'`, `'Letter'` or `{ width, height }` in document units.          |
-| `orientation` | `'portrait'`            | Landscape swaps the supplied base axes.                                       |
-| `fonts`       | Standard PDF fonts      | Static TTF/OTF programs with `family`, `data`, optional `weight` and `style`. |
-| `metadata`    | Title: `'RenderPDF.js'` | Unicode title, author, subject and keyword strings.                           |
-| `signal`      | —                       | Cooperative cancellation via `AbortSignal`.                                   |
+| Setting       | Default                 | Meaning                                                                                    |
+| ------------- | ----------------------- | ------------------------------------------------------------------------------------------ |
+| `unit`        | `'pt'`                  | `'pt'`, `'mm'` or `'px'` for coordinates and dimensions.                                   |
+| `format`      | `'A4'`                  | `'A4'`, `'A3'`, `'Letter'` or `{ width, height }` in document units.                       |
+| `orientation` | `'portrait'`            | Landscape swaps the supplied base axes.                                                    |
+| `fonts`       | Standard PDF fonts      | TTF/OTF bytes, bare base64 or font data URLs with `family`, optional `weight` and `style`. |
+| `metadata`    | Title: `'RenderPDF.js'` | Unicode title, author, subject and keyword strings.                                        |
+| `signal`      | —                       | Cooperative cancellation via `AbortSignal`.                                                |
 
 Coordinates start at the top-left. Text `y` is a **baseline**, while rectangle and
 image `y` is a top edge. Font sizes always use **points**, independent of `unit`.
@@ -51,6 +52,8 @@ Helvetica, Times and Courier include regular, bold, italic and bold-italic faces
 Their character sets are limited. For Czech and other Unicode text, provide an
 appropriate font program. Select an exact face using `font`, `fontWeight` and
 `fontStyle`; missing fonts and glyphs fail explicitly. Fonts are not substituted.
+Variable TTF programs use only their upright default axes and declared default
+weight; nondefault axes must be instantiated before use.
 
 ## Page management
 
@@ -155,12 +158,15 @@ for (const [index, output] of document.getPages().entries()) {
 order, including repeats. `splitPDF(source, options?)` returns one result per page.
 Inputs accept `File`/`Blob`, `ArrayBuffer`, `Uint8Array` and completed export results;
 the application fetches URLs itself. Options support `metadata`, `signal` and
-`onProgress` with stage-local counters.
+`onProgress` with stage-local counters. `flattenForms: true` optionally paints
+prepared ordinary AcroForm appearances before copying pages; by default forms
+still fail. Flattening removes editable fields.
 
 Pages retain text, vectors, image resources, sizes, crop boxes and rotation.
 Explicit internal page links are remapped to the new page references. Named
-destinations, links to omitted pages, encrypted/malformed PDFs and interactive
-AcroForm/XFA inputs fail explicitly. Flatten fields before composition.
+destinations, links to omitted pages, encrypted/malformed PDFs, XFA and signed
+forms fail explicitly. Interactive AcroForm fields require the explicit flatten
+option or earlier flattening by the document owner.
 Document-level outlines, signatures, attachments and original metadata are not copied.
 Composition is limited to 1,000 pages, 128 MiB per input and 256 MiB total input.
 

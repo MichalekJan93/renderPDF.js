@@ -26,6 +26,9 @@ describe('public page options', () => {
     expect(
       resolvePage({ fonts, format: { width: 500, height: 400 }, orientation: 'landscape' }).width,
     ).toBe(400);
+    // Auto orientation keeps portrait paper during preflight; the measured renderer chooses later.
+    expect(resolvePage({ fonts, format: 'Letter', orientation: 'auto' }).width).toBe(816);
+    expect(resolvePage({ fonts, fit: 'width' }).width).toBeCloseTo(793.707, 2);
   });
 
   it('rejects invalid runtime options before a browser or PDF document is needed', () => {
@@ -37,6 +40,7 @@ describe('public page options', () => {
       { fonts, format: { width: 500, height: Number.POSITIVE_INFINITY } },
       { fonts, format: { width: 500 } },
       { fonts, orientation: 'sideways' },
+      { fonts, fit: 'stretch' },
       { fonts, margin: Number.NaN },
       { fonts, margin: -1 },
       { fonts, margin: 1000 },

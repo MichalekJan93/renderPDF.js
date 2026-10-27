@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
+import pixelmatch from 'pixelmatch';
 import type { RegisteredFont, RenderPDFOptions } from '../../src/index';
 import type { InspectedPage } from './pdf-inspector';
 
@@ -157,6 +158,124 @@ test('repeated native table headers and selectable page bands preserve every row
   expect(await source.evaluate((element) => element.outerHTML)).toBe(originalMarkup);
 });
 
+test('left and right footer text and connected HTML header repeat without flattening body text', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await loadFixture(page);
+  await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('#statement')!;
+    root
+      .querySelector('tbody')!
+      .replaceChildren(...Array.from(root.querySelectorAll('tbody tr')).slice(0, 12));
+    // The decoration remains a connected sibling so source HTML and layout stay caller-owned.
+    const header = document.createElement('div');
+    header.id = 'html-header';
+    header.style.cssText =
+      "box-sizing:border-box;width:460px;height:44px;padding:9px 12px;background:#e1ebf5;color:#163049;font:14px/20px 'Statement Sans'";
+    header.textContent = 'HTMLHEAD Příliš žluťoučký kůň';
+    root.after(header);
+  });
+  const headerPixels = PNG.sync.read(await page.locator('#html-header').screenshot());
+  const evidence = await page.evaluate(async () => {
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const fonts = (window as unknown as { pageBandFonts: RegisteredFont[] }).pageBandFonts;
+    const source = document.querySelector<HTMLElement>('#statement')!;
+    const original = source.outerHTML;
+    const pdf = await api.renderPDF(source, {
+      fonts,
+      format: { width: 500, height: 400 },
+      margin: 20,
+      header: { element: document.querySelector<HTMLElement>('#html-header')!, height: 44 },
+      footer: { height: 28, left: 'Vytiskl: Test', right: 'Strana {pageNumber} z {pageCount}' },
+    });
+    return {
+      bytes: Array.from(await pdf.toUint8Array()),
+      pageCount: pdf.pageCount,
+      unchanged: original === source.outerHTML,
+    };
+  });
+  const pages = await inspect(page, evidence.bytes);
+  expect(evidence.unchanged).toBe(true);
+  expect(pages.length).toBeGreaterThanOrEqual(2);
+  expect(evidence.pageCount).toBe(pages.length);
+  for (const [index, pdfPage] of pages.entries()) {
+    const text = pageText(pdfPage);
+    expect(text.match(/HTMLHEADPřílišžluťoučkýkůň/g)).toHaveLength(1);
+    expect(text.match(/Vytiskl:Test/g)).toHaveLength(1);
+    expect(text.match(new RegExp(`Strana${index + 1}z${pages.length}`, 'g'))).toHaveLength(1);
+    // PDF.js renders at 96 DPI, matching the browser's device scale of one.
+    const rendered = PNG.sync.read(Buffer.from(pdfPage.png.split(',')[1]!, 'base64'));
+    const crop = new Uint8Array(headerPixels.width * headerPixels.height * 4);
+    for (let row = 0; row < headerPixels.height; row += 1) {
+      const sourceOffset = ((row + 20) * rendered.width + 20) * 4;
+      crop.set(
+        rendered.data.subarray(sourceOffset, sourceOffset + headerPixels.width * 4),
+        row * headerPixels.width * 4,
+      );
+    }
+    const difference = pixelmatch(
+      headerPixels.data,
+      crop,
+      null,
+      headerPixels.width,
+      headerPixels.height,
+      { threshold: 0.1, includeAA: false },
+    );
+    expect(difference / (headerPixels.width * headerPixels.height)).toBeLessThan(0.1);
+  }
+  const allText = pages.map(pageText).join('');
+  for (let index = 1; index <= 12; index += 1) {
+    const marker = `ROW${String(index).padStart(3, '0')}A`;
+    expect(allText.match(new RegExp(marker, 'g'))).toHaveLength(1);
+  }
+});
+
+test('HTML page bands reject DOM and CSSOM edits during main source preparation', async ({
+  page,
+}) => {
+  await loadFixture(page);
+  const codes = await page.evaluate(async () => {
+    // Exercise both mutation records and stylesheet edits through the public export API.
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const fonts = (window as unknown as { pageBandFonts: RegisteredFont[] }).pageBandFonts;
+    const source = document.querySelector<HTMLElement>('#statement')!;
+    const header = document.createElement('div');
+    header.className = 'mutable-page-header';
+    header.style.cssText = "width:460px;font:14px 'Statement Sans'";
+    header.textContent = 'Original header';
+    source.after(header);
+    const stylesheet = document.createElement('style');
+    stylesheet.textContent = '.mutable-page-header { color: rgb(10, 20, 30); }';
+    document.head.append(stylesheet);
+    const rule = stylesheet.sheet!.cssRules[0] as CSSStyleRule;
+    const rejected: string[] = [];
+    for (const edit of ['dom', 'cssom'] as const) {
+      try {
+        await api.renderPDF(source, {
+          fonts,
+          format: { width: 500, height: 400 },
+          margin: 20,
+          header: { element: header, height: 32 },
+          onProgress(progress) {
+            if (edit === 'dom' && progress.stage === 'preparing' && progress.completed === 0)
+              header.textContent = 'Changed header';
+            if (edit === 'cssom' && progress.stage === 'preparing' && progress.completed === 1)
+              rule.style.setProperty('color', 'rgb(80, 40, 20)');
+          },
+        });
+        rejected.push('NO_ERROR');
+      } catch (error) {
+        rejected.push(error instanceof api.RenderPDFError ? error.code : 'UNEXPECTED_ERROR');
+      }
+    }
+    return rejected;
+  });
+  expect(codes).toEqual(['SOURCE_CHANGED', 'SOURCE_CHANGED']);
+});
+
 test('a table header near the page bottom moves together with its first complete row', async ({
   page,
 }) => {
@@ -304,6 +423,10 @@ test('invalid page bands and impossible repeated headers fail with actionable pu
     await reject('line', { header: { text: 'První\nDruhý', height: 32 } });
     await reject('wide', { header: { text: 'A'.repeat(200), height: 32 } });
     await reject('short', { header: { text: 'Výpis', height: 2, fontSize: 12 } });
+    await reject('slotsOverlap', {
+      footer: { height: 28, left: 'A'.repeat(35), right: 'B'.repeat(35) },
+    });
+    await reject('bandInside', { header: { element: source, height: 32 } });
     // The header plus one atomic body row must fit after reserving both page bands.
     source.querySelector<HTMLElement>('thead th')!.style.height = '280px';
     await reject('table', {
@@ -327,11 +450,20 @@ test('invalid page bands and impossible repeated headers fail with actionable pu
     await reject('headerPaint', { repeatTableHeaders: true });
     return errors;
   });
-  for (const label of ['repeatType', 'height', 'size', 'align', 'reserves', 'font', 'line']) {
+  for (const label of [
+    'repeatType',
+    'height',
+    'size',
+    'align',
+    'reserves',
+    'font',
+    'line',
+    'bandInside',
+  ]) {
     expect(evidence[label]!.code, label).toBe('INVALID_OPTIONS');
     expect(evidence[label]!.message.length, label).toBeGreaterThan(10);
   }
-  for (const label of ['wide', 'short']) {
+  for (const label of ['wide', 'short', 'slotsOverlap']) {
     expect(evidence[label]!.code, label).toBe('SOURCE_OVERFLOW');
     expect(evidence[label]!.message).toMatch(/header|band/i);
   }

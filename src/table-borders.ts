@@ -1,4 +1,5 @@
 import { RenderPDFError } from './diagnostics.js';
+import { computedStyle, isHtmlTag } from './dom.js';
 import type { BorderOperation, Bounds } from './types.js';
 
 /** Subpixel equality is only used to join browser-measured shared grid edges. */
@@ -241,9 +242,8 @@ export function collapsedTableOwner(
     )
   )
     return undefined;
-  const table = element instanceof HTMLTableElement ? element : element.closest('table');
-  return table &&
-    (element === table ? style : getComputedStyle(table)).borderCollapse === 'collapse'
+  const table = isHtmlTag(element, 'table') ? element : element.closest('table');
+  return table && (element === table ? style : computedStyle(table)).borderCollapse === 'collapse'
     ? table
     : undefined;
 }
@@ -304,7 +304,7 @@ export function measureCollapsedTableBorders(
     table.parentElement?.closest('table') ||
     table.querySelector('table') ||
     table.caption ||
-    !['table', 'inline-table'].includes(getComputedStyle(table).display)
+    !['table', 'inline-table'].includes(computedStyle(table).display)
   ) {
     throw new RenderPDFError(
       'UNSUPPORTED_ELEMENT',
@@ -336,7 +336,7 @@ export function measureCollapsedTableBorders(
     },
   );
   const add = (element: HTMLTableElement | HTMLTableCellElement, bounds: typeof grid) => {
-    const style = getComputedStyle(element);
+    const style = computedStyle(element);
     const owner = element === table ? 'table' : 'cell';
     for (const side of ['Top', 'Right', 'Bottom', 'Left'] as const) {
       const horizontal = side === 'Top' || side === 'Bottom';

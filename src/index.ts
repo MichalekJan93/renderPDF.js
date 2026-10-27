@@ -1,4 +1,6 @@
 export { renderPDF } from './render-pdf.js';
+export { renderHTML } from './render-html.js';
+export type { RenderHTMLBand, RenderHTMLTextBand, RenderHTMLOptions } from './render-html.js';
 export { imageToPDF } from './image-pdf.js';
 export { registerFont } from './fonts.js';
 export { RenderPDFError } from './diagnostics.js';
@@ -42,6 +44,9 @@ export type {
   ImagePDFOptions,
   CustomPageSize,
   PageTextOptions,
+  PageTextSlotsOptions,
+  PageHTMLBandOptions,
+  PageBandOptions,
   PDFMetadata,
   RenderStage,
   RenderProgress,

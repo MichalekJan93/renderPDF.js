@@ -38,7 +38,9 @@ export interface RenderWarning {
     | 'TEXT_METRICS_APPROXIMATED'
     | 'RASTER_FALLBACK'
     | 'RASTER_TEXT_OMITTED'
-    | 'BREAK_AVOID_RELAXED';
+    | 'BREAK_AVOID_RELAXED'
+    | 'SOURCE_VERIFICATION_REDUCED'
+    | 'FONT_SUBSTITUTED';
   /** Explanation of the behavior and its relevant fidelity limit. */
   readonly message: string;
 }

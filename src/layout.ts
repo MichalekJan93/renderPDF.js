@@ -1,4 +1,6 @@
 import { RenderPDFError, type RenderWarning } from './diagnostics.js';
+import { computedStyle, isHtmlElement, isHtmlTag, isShadowRoot } from './dom.js';
+import { resolveRegisteredFont } from './fonts.js';
 import { assertAutomaticRasterBoundary, automaticRasterReason } from './planner.js';
 import {
   collapsedTableOwner,
@@ -51,8 +53,7 @@ function composedParent(element: HTMLElement): HTMLElement | null {
   // A shadow-root source still inherits clipping and transforms from its host.
   const tree = element.getRootNode();
   return (
-    element.parentElement ??
-    (tree instanceof ShadowRoot && tree.host instanceof HTMLElement ? tree.host : null)
+    element.parentElement ?? (isShadowRoot(tree) && isHtmlElement(tree.host) ? tree.host : null)
   );
 }
 
@@ -68,7 +69,7 @@ function validateVectorStyle(
   collapsed = false,
 ): void {
   // Chromium clips replaced image content to its own box by default; fill embedding matches it.
-  const replacedImage = element instanceof HTMLImageElement;
+  const replacedImage = isHtmlTag(element, 'img');
   // These properties require a stacking, clipping, or effects planner beyond this supported subset.
   const unsupported = [
     style.position !== 'static' && `position: ${style.position}`,
@@ -112,7 +113,7 @@ function validateVectorStyle(
   // Generated content has geometry outside this experiment's DOM text traversal.
   for (const pseudo of ['::before', '::after']) {
     // An absent pseudo element reports either none or normal in Chromium.
-    const content = getComputedStyle(element, pseudo).content;
+    const content = computedStyle(element, pseudo).content;
     if (content !== 'none' && content !== 'normal') {
       unsupported.push(`generated content ${pseudo}`);
     }
@@ -123,10 +124,7 @@ function validateVectorStyle(
       `Unsupported CSS on ${element.tagName}: ${unsupported.join(', ')}. Use a bounded data-raster subtree when safe.`,
     );
   }
-  if (
-    element instanceof HTMLTableElement &&
-    !['separate', 'collapse'].includes(style.borderCollapse)
-  ) {
+  if (isHtmlTag(element, 'table') && !['separate', 'collapse'].includes(style.borderCollapse)) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
       'Native table snapshots require separate or collapsed borders.',
@@ -183,7 +181,7 @@ function validateVectorStyle(
  */
 function validateDisplay(element: HTMLElement, style: CSSStyleDeclaration): void {
   if (
-    !(element instanceof HTMLImageElement) &&
+    !isHtmlTag(element, 'img') &&
     ![
       'block',
       'flow-root',
@@ -227,26 +225,9 @@ function measureText(
   const parent = node.parentElement;
   if (!parent || !node.data.replace(/[\t\n\r\f ]+/g, '')) return [];
   // All runs of this text node share the parent's computed font face.
-  const style = getComputedStyle(parent);
-  // Normalize a quoted family name while retaining the first actual CSS choice.
-  const family = style.fontFamily
-    .split(',')[0]
-    ?.trim()
-    .replace(/^['"]|['"]$/g, '');
-  // Browser computed weights are numeric even when the authored value is bold.
-  const weight = Number(style.fontWeight);
-  // Only explicitly supplied faces may be mapped to PDF glyphs.
-  const face = fonts.find(
-    (font) =>
-      font.family.toLowerCase() === family?.toLowerCase() &&
-      font.weight === weight &&
-      font.style === style.fontStyle,
-  );
-  if (!face)
-    throw new RenderPDFError(
-      'MISSING_FONT',
-      `No exact registered font face for ${style.fontFamily} ${style.fontWeight} ${style.fontStyle}.`,
-    );
+  const style = computedStyle(parent);
+  // Browser and PDF face selection share CSS weight matching without accepting unknown families.
+  const face = resolveRegisteredFont(style, fonts);
   if (
     style.direction !== 'ltr' ||
     style.writingMode !== 'horizontal-tb' ||
@@ -280,7 +261,7 @@ function measureText(
   let metrics = cache.fonts.get(fontDescription);
   if (!metrics) {
     // FontFaceSet.check alone also succeeds for unknown families resolved through fallback.
-    const loadedFace = Array.from(document.fonts).some((browserFace) => {
+    const loadedFace = Array.from(node.ownerDocument.fonts).some((browserFace) => {
       // Normalize author-provided aliases before comparing the explicit face contract.
       const browserWeight =
         browserFace.weight === 'normal'
@@ -296,7 +277,7 @@ function measureText(
         browserFace.status === 'loaded'
       );
     });
-    if (!loadedFace || !document.fonts.check(fontDescription, node.data))
+    if (!loadedFace || !node.ownerDocument.fonts.check(fontDescription, node.data))
       throw new RenderPDFError('MISSING_FONT', `Browser font is not loaded: ${fontDescription}.`);
     cache.context.font = fontDescription;
     // Font bounding metrics cover accents consistently across lines, unlike actual ink bounds.
@@ -317,7 +298,7 @@ function measureText(
   // Grapheme boundaries preserve surrogate pairs and combining Czech/Latin marks.
   const segments = graphemes.segment(node.data);
   // A reusable Range reads browser-produced geometry, not a synthetic line-breaking algorithm.
-  const range = document.createRange();
+  const range = node.ownerDocument.createRange();
   // Line ranges are collected before their complete text and horizontal extent are measured.
   const lines: { start: number; end: number; top: number }[] = [];
   // Each grapheme's visible rectangle identifies the line selected by browser layout.
@@ -413,8 +394,9 @@ function validateLayoutSource(
     throw new RenderPDFError('INVALID_OPTIONS', 'Table header repetition must be a boolean.');
   }
   if (
-    !(root instanceof HTMLElement) ||
-    root.ownerDocument !== document ||
+    !root ||
+    !isHtmlElement(root) ||
+    !root.ownerDocument.defaultView ||
     !root.isConnected ||
     fonts.length === 0
   )
@@ -435,7 +417,7 @@ function validateLayoutSource(
   // Ancestor effects can alter pixels without changing local descendant computed styles.
   for (let ancestor = composedParent(root); ancestor; ancestor = composedParent(ancestor)) {
     // Exporting a clipped/transformed application viewport requires a richer scene model.
-    const ancestorStyle = getComputedStyle(ancestor);
+    const ancestorStyle = computedStyle(ancestor);
     if (
       ancestorStyle.transform !== 'none' ||
       ancestorStyle.filter !== 'none' ||
@@ -472,13 +454,13 @@ function measureTableHeaders(
 ): TableHeader[] {
   // Root tables participate just like tables nested in an ordinary document wrapper.
   const tables = Array.from(root.querySelectorAll('table'));
-  if (root instanceof HTMLTableElement) tables.unshift(root);
+  if (isHtmlTag(root, 'table')) tables.unshift(root);
   // One page reserves one full-width header band; concurrent tables cannot share that contract.
   const headers: TableHeader[] = [];
   for (const table of tables) {
     // Tables without a visible original header or body do not need a continuation header.
     const head = table.tHead;
-    if (!head || getComputedStyle(head).display === 'none') continue;
+    if (!head || computedStyle(head).display === 'none') continue;
     const collapsed = collapsedTables.get(table);
     const bounds = collapsed?.headerBounds ?? relativeBounds(head.getBoundingClientRect(), origin);
     if (bounds.width <= 0 || bounds.height <= 0) continue;
@@ -496,8 +478,8 @@ function measureTableHeaders(
       table.parentElement?.closest('table') ||
       table.querySelector('table') ||
       Array.from(table.children).filter((child) => child.tagName === 'THEAD').length !== 1 ||
-      getComputedStyle(table).display !== 'table' ||
-      getComputedStyle(head).display !== 'table-header-group'
+      computedStyle(table).display !== 'table' ||
+      computedStyle(head).display !== 'table-header-group'
     ) {
       throw new RenderPDFError(
         'UNSUPPORTED_ELEMENT',
@@ -597,10 +579,10 @@ export async function snapshotLayout(
   const fallback = options.fallback ?? 'auto';
   const repeatTableHeaders = options.repeatTableHeaders ?? false;
   validateLayoutSource(root, fonts, fallback, repeatTableHeaders);
-  await document.fonts.ready;
+  await root.ownerDocument.fonts.ready;
   // Image decoding completes before any geometry is measured.
   const images = Array.from(root.querySelectorAll('img'));
-  if (root instanceof HTMLImageElement) images.unshift(root);
+  if (isHtmlTag(root, 'img')) images.unshift(root);
   await Promise.all(
     images.map(async (image) => {
       try {
@@ -642,7 +624,7 @@ export function measurePreparedLayout(
       'The source root must have positive visible dimensions.',
     );
   // Canvas is never appended, so measurement leaves the application DOM unchanged.
-  const contextCandidate = document.createElement('canvas').getContext('2d');
+  const contextCandidate = root.ownerDocument.createElement('canvas').getContext('2d');
   if (!contextCandidate)
     throw new RenderPDFError('INVALID_SOURCE', 'Canvas font measurement is unavailable.');
   // Capture the checked context as a non-null value for the recursive visitor.
@@ -676,7 +658,7 @@ export function measurePreparedLayout(
     // A header's own box and descendants form one contiguous section of the original paint list.
     const operationStart = operations.length;
     // Display-none descendants have no paint or extraction contribution.
-    const style = getComputedStyle(element);
+    const style = computedStyle(element);
     if (style.display === 'none') return;
     const collapsed = collapsedTableOwner(element, style);
     if (style.visibility !== 'visible') {
@@ -695,6 +677,7 @@ export function measurePreparedLayout(
       (!insideRaster || insideAutomatic) &&
       ![
         'MAIN',
+        'BODY',
         'SECTION',
         'ARTICLE',
         'DIV',
@@ -779,7 +762,7 @@ export function measurePreparedLayout(
     }
     // One chosen boundary owns all visible descendants exactly once, regardless of nested markers.
     const raster = explicitRaster || automaticReason !== undefined;
-    if (raster && collapsed && !(element instanceof HTMLTableElement)) {
+    if (raster && collapsed && !isHtmlTag(element, 'table')) {
       throw new RenderPDFError(
         'UNSUPPORTED_CSS',
         'Collapsed table cells and internal groups cannot be independently rasterized.',
@@ -819,14 +802,14 @@ export function measurePreparedLayout(
       validateVectorStyle(element, style, false, collapsed !== undefined);
       validateDisplay(element, style);
       if (
-        element instanceof HTMLTableRowElement ||
-        (element instanceof HTMLTableCellElement && element.rowSpan !== 1)
+        isHtmlTag(element, 'tr') ||
+        ((isHtmlTag(element, 'td') || isHtmlTag(element, 'th')) && element.rowSpan !== 1)
       ) {
         const atomic = { ...bounds };
         atomicBounds.push(atomic);
-        if (element instanceof HTMLTableRowElement) tableRows.set(element, atomic);
+        if (isHtmlTag(element, 'tr')) tableRows.set(element, atomic);
       }
-      if (element instanceof HTMLImageElement) {
+      if (isHtmlTag(element, 'img')) {
         if (style.objectFit !== 'fill' || style.borderTopWidth !== '0px')
           throw new RenderPDFError(
             'UNSUPPORTED_CSS',
@@ -868,10 +851,10 @@ export function measurePreparedLayout(
       const siblingBounds = Array.from(element.children)
         .filter(
           (child): child is HTMLElement =>
-            child instanceof HTMLElement &&
+            isHtmlElement(child) &&
             !(collapsed && ['COL', 'COLGROUP'].includes(child.tagName)) &&
-            getComputedStyle(child).display !== 'none' &&
-            getComputedStyle(child).visibility !== 'hidden',
+            computedStyle(child).display !== 'none' &&
+            computedStyle(child).visibility !== 'hidden',
         )
         .map((child) => child.getBoundingClientRect());
       for (let firstIndex = 0; firstIndex < siblingBounds.length; firstIndex += 1) {
@@ -899,30 +882,31 @@ export function measurePreparedLayout(
     }
     // Child nodes, including inline text, retain source order within the restricted paint model.
     for (const child of element.childNodes) {
-      if (child instanceof Text)
-        operations.push(...measureText(child, origin, fonts, cache, invisible));
-      else if (child instanceof HTMLElement) visit(child, invisible, automatic);
-      else if (child instanceof Element) {
+      if (child.nodeType === 3)
+        operations.push(...measureText(child as Text, origin, fonts, cache, invisible));
+      else if (isHtmlElement(child)) visit(child, invisible, automatic);
+      else if (child.nodeType === 1) {
+        const foreign = child as Element;
         if (invisible)
           warnings.push({
             code: 'RASTER_TEXT_OMITTED',
-            message: `Raster text extraction omitted for ${child.tagName}.`,
+            message: `Raster text extraction omitted for ${foreign.tagName}.`,
           });
         else
           throw new RenderPDFError(
             'UNSUPPORTED_ELEMENT',
-            `Cannot snapshot ${child.tagName}; use a raster subtree.`,
+            `Cannot snapshot ${foreign.tagName}; use a raster subtree.`,
           );
       }
     }
     if (
       repeatTableHeaders &&
-      element instanceof HTMLTableSectionElement &&
+      ['THEAD', 'TBODY', 'TFOOT'].includes(element.tagName) &&
       element.tagName === 'THEAD'
     ) {
-      headerPaint.set(element, operations.slice(operationStart));
+      headerPaint.set(element as HTMLTableSectionElement, operations.slice(operationStart));
     }
-    if (!invisible && element instanceof HTMLTableElement && collapsed) {
+    if (!invisible && isHtmlTag(element, 'table') && collapsed) {
       const paint = measureCollapsedTableBorders(element, origin);
       collapsedTables.set(element, paint);
       // Avoid the JavaScript argument-count limit when a long table creates many border segments.

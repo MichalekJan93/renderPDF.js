@@ -7,13 +7,13 @@ export default defineConfig({
   use: {
     browserName: 'chromium',
     channel: 'chrome',
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:5183',
     viewport: { width: 1000, height: 900 },
     deviceScaleFactor: 1,
   },
   webServer: {
-    command: 'npm run dev',
-    url: 'http://127.0.0.1:5173',
-    reuseExistingServer: !process.env.CI,
+    command: 'npm run dev -- --port 5183 --strictPort',
+    url: 'http://127.0.0.1:5183/tests/fixtures/rendering.html',
+    reuseExistingServer: false,
   },
 });

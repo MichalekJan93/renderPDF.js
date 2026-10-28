@@ -13,19 +13,29 @@
   },
   "types": "./dist/index.d.ts",
   "sideEffects": false,
+  "files": [
+    "dist/index.js",
+    "dist/*.d.ts",
+    "README.md",
+    "LICENSE",
+    "assets/renderpdf-logo.png"
+  ],
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "vp dev --host 127.0.0.1",
-    "build": "npm run typecheck && vp build --config vite.library.config.ts && tsc -p tsconfig.build.json && vp build",
+    "build": "npm run build:library",
+    "build:library": "npm run typecheck && vp build --config vite.library.config.ts && tsc -p tsconfig.build.json",
+    "prepack": "npm run build:library && npm run check:package",
+    "check:package": "node scripts/check-package.ts",
     "typecheck": "vp check --no-fmt --no-lint",
     "test": "vp test",
     "test:browser": "playwright test",
     "lint": "vp lint",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
-    "check": "vp check && npm test && npm run test:browser && npm run build"
+    "check": "vp check && npm test && npm run test:browser && npm run build && npm run check:package"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

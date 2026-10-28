@@ -398,7 +398,7 @@ test('strict mode and unsafe effects fail explicitly while oversized avoid boxes
     const explicit = await api.renderPDF(root, { ...options, fallback: 'strict' });
     root.innerHTML =
       '<div style="box-shadow: 0 2px 8px #345; padding: 12px">Vnější stín přetéká.</div>';
-    await rejection('outerShadow', () => api.renderPDF(root, options));
+    await rejection('outerShadow', () => api.renderPDF(root, { ...options, strictCss: true }));
     root.innerHTML =
       '<div style="backdrop-filter: blur(2px); padding: 12px">Efekt závisí na pozadí.</div>';
     await rejection('backdrop', () => api.renderPDF(root, options));
@@ -493,6 +493,51 @@ test('strict mode and unsafe effects fail explicitly while oversized avoid boxes
   ).toBe(evidence.oversizedText.replace(/\s+/g, ''));
 });
 
+test('default CSS omission preserves content while strictCss rejects unsupported decoration', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await loadFixture(page);
+  const evidence = await page.evaluate(async () => {
+    // Public options must behave consistently for native tables and local gradient rasters.
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const root = document.querySelector<HTMLElement>('#hybrid')!;
+    const fonts = (window as unknown as { hybridFonts: RegisteredFont[] }).hybridFonts;
+    root.innerHTML = `
+      <div style="background: linear-gradient(90deg, #dceefe, #e6f6e7); box-shadow: 0 4px 8px #345; padding: 12px">
+        <small>Menší český text zůstává.</small>
+      </div>
+      <table style="border-collapse: collapse; box-shadow: 0 4px 8px #345">
+        <tbody><tr style="background: #edf3fa"><td>První řádek.</td></tr>
+        <tr><td>Druhý řádek.</td></tr></tbody>
+      </table>`;
+    const markup = root.innerHTML;
+    const result = await api.renderPDF(root, { fonts, format: 'A4', margin: 24 });
+    let strictError = 'NO_ERROR';
+    try {
+      await api.renderPDF(root, { fonts, format: 'A4', margin: 24, strictCss: true });
+    } catch (error) {
+      strictError = error instanceof api.RenderPDFError ? error.code : String(error);
+    }
+    return {
+      bytes: Array.from(await result.toUint8Array()),
+      markup,
+      unchanged: root.innerHTML === markup,
+      strictError,
+    };
+  });
+  expect(evidence.unchanged).toBe(true);
+  expect(evidence.strictError).toBe('UNSUPPORTED_CSS');
+  const pages = await inspect(page, evidence.bytes);
+  expect(pages).toHaveLength(1);
+  expect(pages[0]!.imagePaints).toBe(1);
+  const text = pages[0]!.text.map((item) => item.text).join('');
+  for (const phrase of ['Menší český text zůstává.', 'První řádek.', 'Druhý řádek.']) {
+    expect(text).toContain(phrase);
+  }
+});
+
 test('the hybrid demo downloads a complete mixed PDF through its actual button', async ({
   page,
 }, testInfo) => {
@@ -500,7 +545,7 @@ test('the hybrid demo downloads a complete mixed PDF through its actual button',
   // Capture uncaught browser errors throughout font setup and the actual asynchronous UI flow.
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
-  await page.goto('/hybrid.html');
+  await page.goto('/tests/fixtures/hybrid.html');
   // The demo enables its action only after exact browser/PDF font registration is complete.
   const button = page.locator('#hybrid-export');
   await expect(button).toBeEnabled();

@@ -50,7 +50,7 @@ test('uploaded legacy tables download as selectable multipage PDF without split 
     };
   });
   // Empty mode deliberately avoids loading a private default document on another machine.
-  await page.goto('/document.html?empty=1');
+  await page.goto('/tests/fixtures/document.html?empty=1');
   await page.waitForFunction(() =>
     Boolean(
       (window as unknown as { documentExperiment?: DocumentExperimentApi }).documentExperiment,
@@ -203,7 +203,7 @@ test('uploaded legacy tables download as selectable multipage PDF without split 
 
 test('active HTML is rejected without replacing the current local preview', async ({ page }) => {
   // Empty mode keeps the test independent of ignored user files and system fonts.
-  await page.goto('/document.html?empty=1');
+  await page.goto('/tests/fixtures/document.html?empty=1');
   await page.waitForFunction(() =>
     Boolean(
       (window as unknown as { documentExperiment?: DocumentExperimentApi }).documentExperiment,

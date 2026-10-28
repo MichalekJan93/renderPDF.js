@@ -68,6 +68,8 @@ export interface RenderPDFOptions {
   rasterScale?: number;
   /** Automatically rasterize safe local effects (default auto); strict requires explicit data-raster. */
   fallback?: 'auto' | 'strict';
+  /** Reject unsupported decorative CSS instead of omitting it; defaults to false. */
+  strictCss?: boolean;
   /** Honor supported CSS page breaks (default css), or use geometry-only automatic cuts. */
   pageBreak?: 'auto' | 'css';
   /** Stop preparation and subsequent rendering stages without producing a partial PDF. */

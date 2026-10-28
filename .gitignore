@@ -6,6 +6,7 @@ playwright-report/
 artifacts/
 .vite/
 *.tsbuildinfo
+*.tgz
 *.log
 .env
 .env.*

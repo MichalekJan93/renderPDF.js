@@ -2,7 +2,7 @@ import type { RenderPDFOptions, RenderPDFResult } from './api-types.js';
 import { RenderPDFError, throwIfAborted, type RenderWarning } from './diagnostics.js';
 import { collectPageBreaks } from './breaks.js';
 import { validateRegisteredFonts } from './fonts.js';
-import { snapshotLayout } from './layout.js';
+import { measurePreparedLayout } from './layout.js';
 import { resolvePage } from './page.js';
 import { paginate } from './pagination.js';
 import { writePDF } from './pdf.js';
@@ -24,14 +24,26 @@ export async function renderDocument(
   const fonts = [...options.fonts];
   validateRegisteredFonts(fonts);
   // Preserve primitive options and callback identity throughout this export.
-  const { signal, onWarning, rasterScale = 2, fallback = 'auto', pageBreak = 'css' } = options;
+  const {
+    signal,
+    onWarning,
+    rasterScale = 2,
+    fallback = 'auto',
+    pageBreak = 'css',
+    strictCss = false,
+  } = options;
+  if (typeof strictCss !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'strictCss must be a boolean.');
+  }
   // Observe the source synchronously so edits immediately after renderPDF() are detected.
   const source = prepareSource(element, signal);
   try {
     await source.ready();
-    // Browser layout owns wrapping, Flexbox, Grid and table geometry.
-    const snapshot = await withCancellation(snapshotLayout(element, fonts, { fallback }), signal);
+    // Reject edits queued after readiness before beginning synchronous browser measurement.
     source.assertUnchanged();
+    // No await separates geometry measurement from its baseline; a second full style scan is redundant.
+    const snapshot = measurePreparedLayout(element, fonts, { fallback, strictCss });
+    source.captureBaseline();
     if (snapshot.width > page.width - page.margin.left - page.margin.right) {
       throw new RenderPDFError(
         'SOURCE_OVERFLOW',
@@ -67,6 +79,7 @@ export async function renderDocument(
     const output = await withCancellation(
       writePDF(snapshot, fonts, page, slices, {
         rasterScale,
+        omitUnsupportedCss: !strictCss,
         includeRasterText,
         ...(signal ? { signal } : {}),
       }),

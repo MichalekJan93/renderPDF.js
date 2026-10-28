@@ -34,7 +34,7 @@ function composedParent(element: HTMLElement): HTMLElement | null {
   );
 }
 
-/** Reject CSS whose paint order or appearance this isolated experiment cannot reproduce.
+/** Reject unsafe CSS while allowing configured decorative omissions.
  * @param element Source element inspected without modifying its styles.
  * @param style Browser-computed style for the element.
  * @param allowLocalRasterEffects Whether a checked automatic region owns the supported local effects.
@@ -43,6 +43,8 @@ function validateVectorStyle(
   element: HTMLElement,
   style: CSSStyleDeclaration,
   allowLocalRasterEffects = false,
+  /** Whether unsupported decorative CSS is an error rather than an omitted effect. */
+  strictCss = false,
 ): void {
   // Chromium clips replaced image content to its own box by default; fill embedding matches it.
   const replacedImage = element instanceof HTMLImageElement;
@@ -58,7 +60,7 @@ function validateVectorStyle(
     style.clipPath !== 'none' && 'clip-path',
     style.maskImage !== 'none' && 'mask-image',
     style.backgroundImage !== 'none' && !allowLocalRasterEffects && 'background-image',
-    style.boxShadow !== 'none' && !allowLocalRasterEffects && 'box-shadow',
+    strictCss && style.boxShadow !== 'none' && !allowLocalRasterEffects && 'box-shadow',
     style.borderRadius !== '0px' && !allowLocalRasterEffects && 'border-radius',
     style.overflowX !== 'visible' && !(replacedImage && style.overflowX === 'clip') && 'overflow-x',
     style.overflowY !== 'visible' && !(replacedImage && style.overflowY === 'clip') && 'overflow-y',
@@ -100,13 +102,14 @@ function validateVectorStyle(
       `Unsupported CSS on ${element.tagName}: ${unsupported.join(', ')}. Use a bounded data-raster subtree when safe.`,
     );
   }
-  if (element instanceof HTMLTableElement && style.borderCollapse !== 'separate') {
+  if (strictCss && element instanceof HTMLTableElement && style.borderCollapse !== 'separate') {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
       'Native table snapshots require separate borders; collapsed borders are unsupported.',
     );
   }
   if (
+    strictCss &&
     ['THEAD', 'TBODY', 'TFOOT', 'TR', 'COL', 'COLGROUP'].includes(element.tagName) &&
     style.backgroundColor !== 'rgba(0, 0, 0, 0)'
   ) {
@@ -336,21 +339,16 @@ function measureText(
   });
 }
 
-/** Snapshot the supported static DOM subset as ordered, root-relative paint operations.
- * @param root Connected, visible HTMLElement whose existing browser layout is exported.
- * @param fonts Explicit faces used both by the browser and PDF embedding.
- * @param options Whether safe local effects may choose raster boundaries automatically.
+/** Validate source ownership, font descriptors, and ancestor effects before browser measurement.
+ * @param root Connected HTMLElement whose browser layout belongs to this document.
+ * @param fonts Explicit faces available to text measurement and PDF embedding.
+ * @param fallback Captured raster policy that must remain stable throughout preparation.
  */
-export async function snapshotLayout(
+function validateLayoutSource(
   root: HTMLElement,
   fonts: readonly RegisteredFont[],
-  options: {
-    /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
-    fallback?: 'auto' | 'strict';
-  } = {},
-): Promise<LayoutSnapshot> {
-  // Read the policy once so later caller option mutations cannot change traversal decisions.
-  const fallback = options.fallback ?? 'auto';
+  fallback: 'auto' | 'strict',
+): void {
   if (fallback !== 'auto' && fallback !== 'strict') {
     throw new RenderPDFError('INVALID_OPTIONS', 'Raster fallback must be auto or strict.');
   }
@@ -395,6 +393,26 @@ export async function snapshotLayout(
       );
     }
   }
+}
+
+/** Prepare browser resources, then snapshot the supported static DOM subset without changing it.
+ * @param root Connected, visible HTMLElement whose existing browser layout is exported.
+ * @param fonts Explicit faces used both by the browser and PDF embedding.
+ * @param options Whether safe local effects may choose raster boundaries automatically.
+ */
+export async function snapshotLayout(
+  root: HTMLElement,
+  fonts: readonly RegisteredFont[],
+  options: {
+    /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
+    fallback?: 'auto' | 'strict';
+    /** Reject unsupported decorative CSS rather than omitting it. */
+    strictCss?: boolean;
+  } = {},
+): Promise<LayoutSnapshot> {
+  // Capture the caller's policy before yielding, and reject invalid input before waiting on resources.
+  const fallback = options.fallback ?? 'auto';
+  validateLayoutSource(root, fonts, fallback);
   await document.fonts.ready;
   // Image decoding completes before any geometry is measured.
   const images = Array.from(root.querySelectorAll('img'));
@@ -410,6 +428,31 @@ export async function snapshotLayout(
       }
     }),
   );
+  return measurePreparedLayout(root, fonts, { fallback, strictCss: options.strictCss ?? false });
+}
+
+/** Measure settled browser resources synchronously so a source guard can share the same task.
+ * @param root Connected, visible HTMLElement with its fonts and source images already prepared.
+ * @param fonts Exact registered faces used both by the browser and PDF embedding.
+ * @param options Whether safe local effects may choose raster boundaries automatically.
+ */
+export function measurePreparedLayout(
+  root: HTMLElement,
+  fonts: readonly RegisteredFont[],
+  options: {
+    /** Strict mode keeps native errors unless a boundary has explicit data-raster markup. */
+    fallback?: 'auto' | 'strict';
+    /** Reject unsupported decorative CSS rather than omitting it. */
+    strictCss?: boolean;
+  } = {},
+): LayoutSnapshot {
+  // Capture the policy once; this path deliberately performs no asynchronous resource preparation.
+  const fallback = options.fallback ?? 'auto';
+  const strictCss = options.strictCss ?? false;
+  if (typeof strictCss !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'strictCss must be a boolean.');
+  }
+  validateLayoutSource(root, fonts, fallback);
   // One origin is shared by vector text, image bounds, and raster regions.
   const origin = root.getBoundingClientRect();
   if (origin.width <= 0 || origin.height <= 0)
@@ -465,6 +508,7 @@ export async function snapshotLayout(
         'ARTICLE',
         'DIV',
         'SPAN',
+        'SMALL',
         'P',
         'H1',
         'H2',
@@ -503,13 +547,13 @@ export async function snapshotLayout(
     // Only the current element's effects can select its subtree; ordinary parents remain native.
     const automaticReason =
       !insideRaster && !explicitRaster && fallback === 'auto'
-        ? automaticRasterReason(style)
+        ? automaticRasterReason(style, strictCss)
         : undefined;
     // Every descendant of an automatic region must retain native positioning and paint-order safety.
     const automatic = insideAutomatic || automaticReason !== undefined;
     if (automatic) {
-      if (insideAutomatic) automaticRasterReason(style);
-      validateVectorStyle(element, style, true);
+      if (insideAutomatic) automaticRasterReason(style, strictCss);
+      validateVectorStyle(element, style, true, strictCss);
       validateDisplay(element, style);
     }
     if (
@@ -576,7 +620,7 @@ export async function snapshotLayout(
         return;
       }
     } else if (!insideRaster) {
-      validateVectorStyle(element, style);
+      validateVectorStyle(element, style, false, strictCss);
       validateDisplay(element, style);
       if (
         element instanceof HTMLTableRowElement ||
@@ -611,7 +655,12 @@ export async function snapshotLayout(
         operations.push({
           kind: 'box',
           bounds,
-          background: style.backgroundColor,
+          // Table-row backgrounds are not represented by the native cell paint order.
+          background:
+            !strictCss &&
+            ['THEAD', 'TBODY', 'TFOOT', 'TR', 'COL', 'COLGROUP'].includes(element.tagName)
+              ? 'rgba(0, 0, 0, 0)'
+              : style.backgroundColor,
           borderColor: style.borderTopColor,
           borderWidth: Number.parseFloat(style.borderTopWidth),
         });

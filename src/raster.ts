@@ -62,6 +62,8 @@ function assertSelfContained(
   element: HTMLElement,
   /** Font programs allowed in the cloned SVG document. */
   fonts: readonly RegisteredFont[],
+  /** Whether the selected root's outer shadow is removed from the capture clone. */
+  omitOuterShadow: boolean,
 ): void {
   // Bounds permit inner clipping but reject descendants painted outside the capture.
   const rootBounds = element.getBoundingClientRect();
@@ -124,7 +126,8 @@ function assertSelfContained(
         shadows.some(
           /** Every shadow must remain inside the selected element's own border box. */
           (shadow) => !shadow.includes('inset'),
-        ))
+        ) &&
+        !(omitOuterShadow && descendant === element))
     ) {
       throw new RenderPDFError(
         'RASTER_FAILED',
@@ -239,8 +242,9 @@ function assertSelfContained(
 
 /**
  * Captures one explicitly isolated, self-contained HTML region as PNG bytes.
- * Gradients, rounded corners and inset shadows remain browser-painted. Effects
- * involving a backdrop, external assets or pixels beyond the box fail explicitly.
+ * Gradients, rounded corners and inset shadows remain browser-painted. The
+ * selected root's outer shadow may be omitted; unsafe descendant effects,
+ * backdrops and external assets still fail explicitly.
  */
 export async function captureRaster(
   /** Connected source region; capture never mutates its DOM. */
@@ -256,6 +260,8 @@ export async function captureRaster(
     /** Vertical transparent padding in CSS pixels, from zero inclusive to one exclusive. */
     y: number;
   } = { x: 0, y: 0 },
+  /** Remove only this raster root's unsupported outer shadow in the cloned image. */
+  omitOuterShadow = false,
 ): Promise<Uint8Array> {
   if (!element.isConnected || element.ownerDocument !== document) {
     throw new RenderPDFError(
@@ -303,7 +309,12 @@ export async function captureRaster(
     );
   }
 
-  assertSelfContained(element, fonts);
+  assertSelfContained(element, fonts, omitOuterShadow);
+  // Keep inset layers while dropping any shadow that paints outside the selected border box.
+  const insetShadows = getComputedStyle(element)
+    .boxShadow.split(/,(?![^(]*\))/)
+    .filter((shadow) => /\binset\b/.test(shadow))
+    .join(', ');
   // Supplying fontEmbedCSS bypasses stylesheet scanning and external font requests.
   const fontEmbedCSS = fonts.map(fontFaceCss).join('\n');
   // html-to-image 1.11.13 floors font-size and subtracts 0.1px; copy the exact font shorthand first instead.
@@ -334,6 +345,7 @@ export async function captureRaster(
       width: `${width}px`,
       height: `${height}px`,
       transform: `translate(${offset.x}px, ${offset.y}px)`,
+      ...(omitOuterShadow ? { boxShadow: insetShadows || 'none' } : {}),
     },
   });
   // Decode only the generated local data URL; no fetch or upload occurs here.

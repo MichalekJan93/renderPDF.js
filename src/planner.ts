@@ -39,7 +39,11 @@ function cssLayers(value: string): string[] {
 /** Identify only effects that a bounded subtree can reproduce without surrounding pixels.
  * @param style Browser-computed declarations; native layout and typography remain unchanged.
  */
-export function automaticRasterReason(style: CSSStyleDeclaration): string | undefined {
+export function automaticRasterReason(
+  style: CSSStyleDeclaration,
+  /** Reject effects that cannot fit inside a local raster boundary. */
+  strictCss = false,
+): string | undefined {
   // Each reason names an effect owned by this element, never an unsupported descendant.
   const reasons: string[] = [];
   if (style.backgroundImage !== 'none') {
@@ -58,13 +62,14 @@ export function automaticRasterReason(style: CSSStyleDeclaration): string | unde
   }
   if (style.borderRadius !== '0px') reasons.push('border-radius');
   if (style.boxShadow !== 'none') {
-    if (cssLayers(style.boxShadow).some((shadow) => !/\binset\b/.test(shadow))) {
+    const shadows = cssLayers(style.boxShadow);
+    if (strictCss && shadows.some((shadow) => !/\binset\b/.test(shadow))) {
       throw new RenderPDFError(
         'UNSUPPORTED_CSS',
         'Unsupported CSS: outer shadows require expanded capture bounds; only inset shadows can fall back automatically.',
       );
     }
-    reasons.push('inset box-shadow');
+    if (shadows.some((shadow) => /\binset\b/.test(shadow))) reasons.push('inset box-shadow');
   }
   if (style.opacity !== '1') reasons.push('opacity');
   return reasons.length ? reasons.join(', ') : undefined;

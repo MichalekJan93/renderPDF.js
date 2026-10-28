@@ -21,11 +21,9 @@ Development requires Node.js 22.18+ on the 22.x release line, 24.11+ on 24.x, or
 ```sh
 npm ci
 npm run build
-npm run dev
 ```
 
-Open [the demo](http://127.0.0.1:5173/) to try an export. The build creates an ESM
-entry at `dist/index.js`, TypeScript declarations and demos under `dist/demo/`.
+The build creates an ESM entry at `dist/index.js` and TypeScript declarations.
 Use a bundler to resolve the library's three runtime dependencies.
 
 The npm package is currently unpublished and marked `private` to prevent accidental
@@ -95,7 +93,7 @@ TTF/OTF instances. Do not remove or replace registered browser faces during use.
   Other image formats fail explicitly. External images can require a browser
   fetch at export time; document data is never submitted to a conversion service.
   JPEG EXIF orientation must be absent or 1; normalize rotated image pixels first.
-- Legacy `FONT`, `CENTER` and simple tables with separate borders. Table rows and
+- Legacy `FONT`, `CENTER`, inline `SMALL` and simple tables with separate borders. Table rows and
   rowspan cells remain atomic; oversized atomic content fails.
 - A4, A3 and Letter, portrait/landscape, a numeric margin or four explicit edges.
   Custom paper uses `format: { width: 500, height: 400 }`; dimensions include
@@ -109,12 +107,18 @@ TTF/OTF instances. Do not remove or replace registered browser faces during use.
   objects where safe. Layout/order/overlap guards also apply inside automatic
   regions. Inline fragments and table-internal raster boundaries are rejected.
   Raster resources must be inline bitmaps; external resources, backdrop effects,
-  transforms and effects outside the border box are rejected.
+  transforms and effects outside the border box are rejected. An outer shadow on
+  a selected raster root is omitted by default because it exceeds the captured box.
   Wrapped native inline backgrounds/borders need an explicit containing raster;
   a single union rectangle cannot reproduce their separate line fragments.
 - Explicit `data-raster` remains available. `fallback: 'strict'` disables automatic
   selection while honoring these caller-selected boundaries. Neither mode silently
   substitutes a whole-document screenshot when a local feature cannot be rendered.
+- `strictCss: true` rejects the decorative CSS omissions listed here.
+  The default `false` omits outer box shadows and table row/group backgrounds;
+  collapsed table borders are rendered using the measured cell boxes without
+  reproducing the collapsed-border painting algorithm. These omissions do not
+  change the source DOM. `strictCss` is independent of the raster `fallback` mode.
 - `pageBreak: 'css'` (default) respects block/table-row `break-before: page` and
   `break-after: page`, their legacy `page-break-*: always` aliases, and
   `break-inside: avoid/avoid-page`. Before/after avoidance conservatively keeps
@@ -154,36 +158,51 @@ breaks (`left/right/recto/verso`), column breaks, inline/cell break directives,
 margin-break rules, widow/orphan line-count policies and cloned page decorations
 are unsupported. Nondefault native `widows`/`orphans` and
 `box-decoration-break: clone` fail explicitly. Default line-count values are not
-enforced. Unsupported visible behavior must fail rather than silently produce an
-apparently successful export.
+enforced. Unsupported layout, text ownership, font and resource behavior can still
+fail in the default CSS omission mode; the renderer never drops document text to
+force an export.
 Direct text overlapping later visible paint is also rejected when the simple
 ordered paint list cannot reproduce the browser's block/inline paint phases.
 
 ## Development
 
-Source code lives in `src/`. The demos and measurement helpers in `experiments/`
-use the same rendering pipeline as the public API and are included in browser
-regression tests.
+Source code lives in `src/`. Browser regression pages live in `tests/fixtures/`;
+their measurement helpers in `experiments/` use the same rendering pipeline as
+the public API. `npm run dev` serves these fixtures for development, while
+`npm run build` builds only the library.
+
+Open `/tests/fixtures/rendering.html` for a basic export,
+`/tests/fixtures/hybrid.html` for mixed native/raster pagination, or
+`/tests/fixtures/document.html` for a local HTML chooser and PDF download.
 
 Vite+ provides the development server, builds, Oxlint, Oxfmt and Vitest. Shared
 lint, format and unit-test settings live in `vite.config.ts`; the library build
 uses `vite.library.config.ts` and TypeScript to generate declarations. The toolchain
 is installed locally by `npm ci`; a global Vite+ installation is optional.
 
-- `/` demonstrates selectable text, local raster regions and page mapping.
-- `/hybrid.html` demonstrates automatic local effects, custom paper, CSS breaks,
-  an avoid card and a rowspan table with a PDF download.
-- `/document.html` provides a local HTML chooser and PDF download.
-
-The local document preview deliberately uses one explicitly stated font family;
+The local document fixture deliberately uses one explicitly stated font family;
 the reusable API supports multiple families. Private documents and local system
-font programs belong only in ignored `artifacts/` and are optional for the demos.
+font programs belong only in ignored `artifacts/`; regression tests use synthetic
+documents and do not require them.
 
 Run `npm run check` before submitting a change. It checks types, lint, unit tests,
-browser tests, builds and formatting. Browser tests require an installed Google
+browser tests, builds, formatting and package contents. Browser tests require an installed Google
 Chrome and use synthetic fixtures, Playwright and PDF.js; those tools never run in
 conversion code. Generated PDFs, screenshots and reports stay outside versioned
 source files.
+
+### Local package
+
+`npm pack --pack-destination artifacts` builds the library and checks its contents
+before creating a local archive. Create the `artifacts/` directory first if it is
+absent. The package includes the ESM entry, TypeScript declarations, package metadata,
+README, MIT license and README logo. Demos, test fonts, source files and local
+documents are excluded by an explicit `files` allowlist.
+
+`npm run check:package` checks the current build through npm's dry-run inventory;
+run `npm run build:library` first when no build exists. The check rejects missing
+entry points, empty files and unexpected contents. Packaging does not publish the
+library; `private: true` remains enabled.
 
 ## License
 

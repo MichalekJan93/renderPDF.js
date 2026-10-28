@@ -28,6 +28,8 @@ export interface PDFWriteOptions {
   rasterScale?: number;
   /** Include extraction-only text inside a region already painted as a bitmap. */
   includeRasterText?: boolean;
+  /** Omit a raster root's unsupported outer shadow without changing the source. */
+  omitUnsupportedCss?: boolean;
   /** Stop before beginning subsequent asynchronous writing stages. */
   signal?: AbortSignal;
 }
@@ -242,10 +244,16 @@ export async function writePDF(
         const aligned = rasterPlacement(operation.bounds);
         try {
           // Local capture owns its temporary resources and never mutates the source.
-          const bytes = await captureRaster(operation.element, fonts, options.rasterScale ?? 2, {
-            x: operation.bounds.x - aligned.x,
-            y: operation.bounds.y - aligned.y,
-          });
+          const bytes = await captureRaster(
+            operation.element,
+            fonts,
+            options.rasterScale ?? 2,
+            {
+              x: operation.bounds.x - aligned.x,
+              y: operation.bounds.y - aligned.y,
+            },
+            options.omitUnsupportedCss ?? false,
+          );
           throwIfAborted(options.signal);
           images.set(operation, await pdf.embedPng(bytes));
         } catch (error) {

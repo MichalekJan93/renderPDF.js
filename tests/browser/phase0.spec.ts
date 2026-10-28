@@ -196,15 +196,15 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
   const pageTexts = evidence.pages.map((pdfPage) => pdfPage.text.map((item) => item.text).join(''));
   // These strings cover Unicode, explicit font faces, invisible text and the final page.
   const expectedStrings = [
-    'Příliš žluťoučký kůň úpěl ďábelské ódy.',
-    'Tučný text',
-    'Kurzíva',
-    'Rastrová oblast žije.',
-    'Konec druhé stránky.',
+    'Unicode accents: \u00e1\u010d\u010f\u00e9\u011b\u00ed\u0148\u00f3\u0159\u0161\u0165\u00fa\u016f\u00fd\u017e.',
+    'Bold text: \u010d',
+    'Italic text: \u0159',
+    'Raster region is alive.',
+    'End of the second page.',
   ];
   for (const expected of expectedStrings)
     expect(pageTexts.join('\n').split(expected)).toHaveLength(2);
-  expect(pageTexts[1]).toContain('Konec druhé stránky.');
+  expect(pageTexts[1]).toContain('End of the second page.');
   expect(
     new Set(evidence.pages.flatMap((pdfPage) => pdfPage.text.map((item) => item.fontName))).size,
   ).toBeGreaterThanOrEqual(3);
@@ -388,7 +388,7 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
   }
   expect(
     withoutTextPages.flatMap((pdfPage) => pdfPage.text.map((item) => item.text)).join(''),
-  ).not.toContain('Rastrová oblast žije.');
+  ).not.toContain('Raster region is alive.');
   // Ignore inspector module/worker fetches: the export itself already completed before loading them.
   const unexpectedRequests = exportRequests.filter(
     (url) =>
@@ -547,7 +547,7 @@ test('the demo downloads a PDF Blob without a print dialog or browser errors', a
   });
   await page.goto('/tests/fixtures/rendering.html');
   // Wait for exact font registration before invoking the actual download button.
-  const button = page.getByRole('button', { name: 'Stáhnout experiment PDF' });
+  const button = page.getByRole('button', { name: 'Download experiment PDF' });
   await expect(button).toBeEnabled();
   // Listening starts before clicking so the generated Blob download cannot be missed.
   const downloadPromise = page.waitForEvent('download');
@@ -560,7 +560,7 @@ test('the demo downloads a PDF Blob without a print dialog or browser errors', a
   const downloadedBytes = await readFile(testInfo.outputPath('download.pdf'));
   expect(downloadedBytes.subarray(0, 5).toString()).toBe('%PDF-');
   expect(downloadedBytes.byteLength).toBeGreaterThan(1_000);
-  await expect(page.getByRole('status')).toContainText('2 stránky');
+  await expect(page.getByRole('status')).toContainText('2 pages');
   await expect(button).toBeEnabled();
   expect(
     await page.evaluate(() => (window as unknown as { phase0PrintCalls: number }).phase0PrintCalls),

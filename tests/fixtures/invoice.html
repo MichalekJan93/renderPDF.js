@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Synthetic public API invoice</title>
@@ -70,33 +70,36 @@
     <!-- Fictional names and totals keep browser evidence safe to retain locally. -->
     <main id="invoice">
       <div class="heading">
-        <h1>Zkušební faktura TEST 001</h1>
+        <h1>Test invoice TEST 001</h1>
         <img id="invoice-logo" width="48" height="32" alt="Synthetic colored logo" />
       </div>
       <div class="parties">
         <div class="party">
-          <p><strong>Dodavatel: Ukázková společnost</strong></p>
-          <p>Česká 12, Zkušební město</p>
+          <p><strong>Supplier: Sample Company (Unicode: &#x010d;)</strong></p>
+          <p>12 Sample Street, Test City</p>
         </div>
         <div class="party">
-          <p><strong>Odběratel: Testovací zákazník</strong></p>
-          <p class="accent">Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
+          <p><strong>Customer: Example Client</strong></p>
+          <p class="accent">
+            Unicode accents:
+            &#x00e1;&#x010d;&#x010f;&#x00e9;&#x011b;&#x00ed;&#x0148;&#x00f3;&#x0159;&#x0161;&#x0165;&#x00fa;&#x016f;&#x00fd;&#x017e;.
+          </p>
         </div>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Položka</th>
-            <th>Popis</th>
-            <th>Kontrolní značka</th>
+            <th>Item</th>
+            <th>Description</th>
+            <th>Verification marker</th>
           </tr>
         </thead>
         <tbody id="invoice-rows">
           <!-- Synthetic rows are added by the browser test before measurement. -->
         </tbody>
       </table>
-      <div class="stamp" data-raster>Rastrové potvrzení žije.</div>
-      <p class="footer"><strong>Konec zkušební faktury.</strong></p>
+      <div class="stamp" data-raster>Raster confirmation is present.</div>
+      <p class="footer"><strong>End of the test invoice.</strong></p>
     </main>
   </body>
 </html>

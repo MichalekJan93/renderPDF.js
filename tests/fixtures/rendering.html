@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,36 +11,42 @@
       <h1>RenderPDF.js · Phase 0</h1>
       <p>Browser layout + selectable PDF text + local raster regions.</p>
       <p>
-        <a href="/tests/fixtures/document.html?empty=1">Otevřít HTML a stáhnout PDF</a> ·
-        <a href="/tests/fixtures/hybrid.html">Automatické rastry a stránkování</a>
+        <a href="/tests/fixtures/document.html?empty=1">Open HTML and download PDF</a> ·
+        <a href="/tests/fixtures/hybrid.html">Automatic rasters and pagination</a>
       </p>
-      <button id="export" type="button" disabled>Stáhnout experiment PDF</button>
-      <p id="status" role="status">Načítání registrovaných fontů…</p>
+      <button id="export" type="button" disabled>Download experiment PDF</button>
+      <p id="status" role="status">Loading registered fonts…</p>
     </header>
     <main id="source">
-      <h1>RenderPDF.js: technický experiment</h1>
-      <p>Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
-      <p><strong>Tučný text</strong> a <em>Kurzíva</em> zůstávají skutečným textem.</p>
+      <h1>RenderPDF.js: technical experiment</h1>
+      <p>
+        Unicode accents:
+        &#x00e1;&#x010d;&#x010f;&#x00e9;&#x011b;&#x00ed;&#x0148;&#x00f3;&#x0159;&#x0161;&#x0165;&#x00fa;&#x016f;&#x00fd;&#x017e;.
+      </p>
+      <p>
+        <strong>Bold text: &#x010d;</strong> and <em>Italic text: &#x0159;</em> remain real text.
+      </p>
       <p id="typography">
-        AV To WA office affinity ffi — kerning a ligatury měříme, přesnou shodu neslibujeme.
+        AV To WA office affinity ffi — kerning and ligatures are measured; exact matching is not
+        guaranteed.
       </p>
       <p class="wrap">
-        Tento odstavec ověřuje zalamování podle skutečného browser layoutu. Česká diakritika musí
-        přežít export i extrakci textu. Pozice řádků určuje prohlížeč a knihovna je pouze přenáší do
-        souřadnic PDF.
+        This paragraph verifies wrapping against actual browser layout. Unicode accents must survive
+        export and text extraction. The browser determines line positions; the library transfers
+        them into PDF coordinates.
       </p>
       <div class="flex">
         <div class="card">
-          <strong>Flexbox vlevo</strong>
-          <p>První karta, 220 px.</p>
+          <strong>Left Flexbox</strong>
+          <p>First card, 220 px.</p>
         </div>
         <div class="card">
-          <strong>Flexbox uprostřed</strong>
-          <p>Druhá karta.</p>
+          <strong>Center Flexbox</strong>
+          <p>Second card.</p>
         </div>
         <div class="card">
-          <strong>Flexbox vpravo</strong>
-          <p>Třetí karta.</p>
+          <strong>Right Flexbox</strong>
+          <p>Third card.</p>
         </div>
       </div>
       <div class="grid">
@@ -49,23 +55,23 @@
         <div class="cell">Grid C</div>
         <div class="cell">Grid D</div>
       </div>
-      <p>Vektorový text před lokálním rastrem.</p>
+      <p>Vector text before the local raster.</p>
       <section class="raster" data-raster>
-        <strong>Rastrová oblast žije.</strong>
-        <p>Gradient, zaoblení a vnitřní stín. Text má neviditelnou PDF vrstvu.</p>
+        <strong>Raster region is alive.</strong>
+        <p>Gradient, rounded corners and inset shadow. Text has an invisible PDF layer.</p>
       </section>
-      <p>Vektorový text po lokálním rastru.</p>
-      <img id="bitmap" width="64" height="40" alt="Kontrolní bitmapa" />
+      <p>Vector text after the local raster.</p>
+      <img id="bitmap" width="64" height="40" alt="Reference bitmap" />
       <div class="page-probe">
-        <p>Řádek poblíž automatického zlomu stránky.</p>
-        <p>Další řádek nesmí zmizet ani se opakovat.</p>
-        <p>Souřadnice textu a obrázků sdílejí stejný posun.</p>
+        <p>A line near the automatic page break.</p>
+        <p>The next line must not disappear or repeat.</p>
+        <p>Text and image coordinates share the same offset.</p>
       </div>
       <section class="raster second-raster" data-raster>
-        <strong>Rastr na druhé stránce.</strong>
-        <p>I neviditelný text používá souřadnice druhé stránky.</p>
+        <strong>Raster on the second page.</strong>
+        <p>Invisible text also uses the second-page coordinates.</p>
       </section>
-      <p>Konec druhé stránky.</p>
+      <p>End of the second page.</p>
     </main>
     <script type="module" src="/experiments/demo.ts"></script>
   </body>

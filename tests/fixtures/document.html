@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,19 +9,19 @@
   <body>
     <header class="document-toolbar">
       <div>
-        <h1>Náhled HTML a export PDF</h1>
-        <p id="document-name">Informativní výpis konta</p>
+        <h1>HTML preview and PDF export</h1>
+        <p id="document-name">Account statement preview</p>
       </div>
       <div class="document-actions">
-        <label for="document-file">Otevřít HTML</label>
+        <label for="document-file">Open HTML</label>
         <input id="document-file" type="file" accept=".html,.htm,text/html" />
-        <button id="document-export" type="button" disabled>Stáhnout PDF</button>
+        <button id="document-export" type="button" disabled>Download PDF</button>
       </div>
-      <p id="document-status" role="status" aria-live="polite">Načítání dokumentu…</p>
+      <p id="document-status" role="status" aria-live="polite">Loading document…</p>
       <p class="document-note" id="document-font"></p>
       <p class="document-note">
-        PDF zachová vybíratelný text. Vstup: statické HTML v UTF-8. Původní speciální tiskové
-        záhlaví a zápatí nejsou součástí tohoto náhledu.
+        The PDF retains selectable text. Input: static UTF-8 HTML. Special print headers and footers
+        from the original document are not included in this preview.
       </p>
     </header>
     <div id="document-preview"></div>

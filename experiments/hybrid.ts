@@ -16,10 +16,10 @@ async function initializeHybrid(): Promise<void> {
     loadBrowserFont('/fonts/NotoSans-Bold.ttf', 'Noto Sans', 700),
   ]);
   button.disabled = false;
-  status.textContent = 'Připraveno. Vlastní stránka 500 × 460 CSS px, okraje 20 px.';
+  status.textContent = 'Ready. Custom page: 500 × 460 CSS px, 20px margins.';
   button.addEventListener('click', async () => {
     button.disabled = true;
-    status.textContent = 'Vytváření PDF…';
+    status.textContent = 'Creating PDF…';
     try {
       // No data-raster markers or source mutations are needed for the automatic effects.
       const result = await renderPDF(source, {
@@ -34,7 +34,7 @@ async function initializeHybrid(): Promise<void> {
       const regions = result.warnings.filter(
         (warning) => warning.code === 'RASTER_FALLBACK',
       ).length;
-      status.textContent = `${result.pageCount} stran · ${regions} lokální rastrové oblasti. Textové metriky zůstávají přibližné.`;
+      status.textContent = `${result.pageCount} pages · ${regions} local raster regions. Text metrics remain approximate.`;
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : String(error);
     } finally {

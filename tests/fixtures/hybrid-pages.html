@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Synthetic hybrid pagination fixture</title>
@@ -82,16 +82,19 @@
   <body>
     <!-- All labels are synthetic; this fixture contains no private document data. -->
     <main id="hybrid">
-      <h1>Nativní český nadpis</h1>
-      <p>Vektorový začátek zůstává vyhledatelný.</p>
+      <h1>Native Unicode heading: &#x010d;</h1>
+      <p>The vector opening stays searchable.</p>
       <div id="auto-card" class="card">
-        <p>Žluťoučká karta má místní raster.</p>
-        <p class="nested-effect">Vnořený efekt se vykreslí jednou.</p>
+        <p>
+          Local raster card:
+          &#x00e1;&#x010d;&#x010f;&#x00e9;&#x011b;&#x00ed;&#x0148;&#x00f3;&#x0159;&#x0161;&#x0165;&#x00fa;&#x016f;&#x00fd;&#x017e;.
+        </p>
+        <p class="nested-effect">The nested effect is painted once.</p>
       </div>
       <div id="auto-inset" class="inset-card">
-        <p>Vnitřní stín zachová český text.</p>
+        <p>The inset shadow preserves text.</p>
       </div>
-      <p>Nativní konec: příliš žluťoučký kůň.</p>
+      <p>Native ending: complete Unicode text.</p>
     </main>
   </body>
 </html>

@@ -58,6 +58,7 @@ try {
     margin: 24,
     rasterScale: 2,
     fallback: 'auto',
+    strictCss: false,
     pageBreak: 'css',
     onWarning: (warning) => console.info(warning.code, warning.message),
   });
@@ -82,6 +83,65 @@ registrations. Importing the module is safe without a DOM; conversion and font
 registration require a browser document.
 Variable fonts, WOFF/WOFF2 and font collections are rejected; supply static
 TTF/OTF instances. Do not remove or replace registered browser faces during use.
+
+## API parameters
+
+### `renderPDF(element, options)`
+
+The first row describes the source argument; the remaining rows are fields of
+the second `options` argument. Dimensions and margins use CSS pixels,
+with `1 CSS px = 0.75 PDF pt`. Required values have no implicit substitute.
+
+| Name          | Info                                                                                                                                                                                                                                                                                                                     | Allowed settings                                                                                                               | Default setting                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `element`     | Existing browser layout to export. Keep it connected and stable until the promise settles; the renderer does not resize or reflow it.                                                                                                                                                                                    | A positive-size `HTMLElement` in the current browser document with supported static content.                                   | Required.                                  |
+| `fonts`       | Exact faces for browser text, PDF embedding and local raster text. Register every used family, weight and style.                                                                                                                                                                                                         | A nonempty array of handles returned by `registerFont()` in the current document, with unique family/weight/style descriptors. | Required; no system-font discovery.        |
+| `format`      | Physical paper size, including margins. Custom dimensions are CSS pixels.                                                                                                                                                                                                                                                | `'A4'`, `'A3'`, `'Letter'`, or `{ width, height }` with finite positive dimensions.                                            | `'A4'`.                                    |
+| `orientation` | Selects the paper axes. Landscape swaps the base width/height, including custom sizes; source width and line wrapping remain unchanged.                                                                                                                                                                                  | `'portrait'` or `'landscape'`.                                                                                                 | `'portrait'`.                              |
+| `margin`      | Empty space at page edges, in CSS pixels. The margins must leave a positive content area.                                                                                                                                                                                                                                | A finite nonnegative number for all edges, or a complete `{ top, right, bottom, left }` object with finite nonnegative values. | `24` on every edge.                        |
+| `rasterScale` | Physical bitmap pixels per CSS pixel inside local raster regions. Higher values can improve detail and increase memory, PDF size and conversion time.                                                                                                                                                                    | A finite number greater than `0`, subject to the per-capture canvas budget below.                                              | `2`.                                       |
+| `fallback`    | Controls automatic selection of local raster regions. `'auto'` selects safe effects; `'strict'` uses only elements explicitly marked `data-raster`.                                                                                                                                                                      | `'auto'` or `'strict'`.                                                                                                        | `'auto'`.                                  |
+| `strictCss`   | Controls the documented decorative omissions: outer box shadows and native table row/group/column backgrounds can disappear; collapsed borders use measured cell boxes without the collapsed-border paint algorithm. `true` rejects those cases. Other unsupported CSS and unsafe content can still fail in either mode. | `false` or `true`.                                                                                                             | `false`, allowing these omissions.         |
+| `pageBreak`   | `'css'` honors supported forced page breaks and keep-together preferences. `'auto'` ignores authored fragmentation hints and fills pages from measured geometry. Neither mode cuts an atomic text line, image, raster region, table row or rowspan cell.                                                                 | `'css'` or `'auto'`.                                                                                                           | `'css'`.                                   |
+| `signal`      | Cooperatively cancels preparation and later rendering stages. Cancellation rejects with `AbortError` and returns no partial PDF.                                                                                                                                                                                         | An `AbortSignal`, usually `controller.signal` from an `AbortController`.                                                       | Not set; no caller-requested cancellation. |
+| `onWarning`   | Receives approximation, raster-fallback and pagination warnings. Warnings are also retained in `result.warnings`.                                                                                                                                                                                                        | A synchronous `(warning: RenderWarning) => void` callback.                                                                     | Not set; no automatic console logging.     |
+
+`fallback: 'strict'` and `strictCss: true` are independent controls. The first
+requires explicit markers for raster capture; the second rejects the listed
+decorative omissions. With `fallback: 'strict'` and `strictCss: false`, an
+unmarked box shadow is omitted even when it is inset. Use `data-raster` to retain
+supported inset shadows in that mode. Neither option enables general CSS support.
+An outer shadow on a selected raster root may be omitted, while unsafe effects
+inside its descendants can still fail.
+
+Use `pageBreak: 'auto'` to fill available page space when the HTML contains
+`break-before: page` or `page-break-before: always` that you want to ignore.
+This also ignores `break-inside: avoid` and other authored keep-together hints;
+table rows and the other intrinsic atomic items remain undivided.
+
+Each local raster capture is limited to `8192` physical pixels per axis and
+`16,777,216` total physical pixels. Increasing `rasterScale` can exceed those
+limits even when the HTML element fits on a PDF page.
+
+### `registerFont(source)`
+
+| Name     | Info                                                                                                                                          | Allowed settings                                                                                                                                         | Default setting |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| `family` | Application-owned CSS family used in both the source and the registered handle. Names are trimmed and matched without case sensitivity.       | A nonempty custom name using ASCII letters, digits, spaces, hyphens or underscores. Generic families and CSS-wide keywords are rejected.                 | Required.       |
+| `data`   | Exact static font program. The registration copies the bytes and rejects conflicting programs for an existing family/weight/style descriptor. | A nonempty `Uint8Array` or `ArrayBuffer` containing a static TTF/OTF font. URL strings, WOFF/WOFF2, font collections and variable fonts are unsupported. | Required.       |
+| `weight` | Numeric weight of the supplied static face; provide a separate program for each used weight.                                                  | An integer from `1` to `1000`, such as `400` or `700`.                                                                                                   | `400`.          |
+| `style`  | Style of the supplied face; use a separate italic program instead of browser synthesis.                                                       | `'normal'` or `'italic'`.                                                                                                                                | `'normal'`.     |
+
+### PDF output and per-element raster control
+
+| Name                         | Info                                                                                                                                                                                 | Allowed settings                                                                               | Default setting                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `result.download(filename)`  | Downloads the already generated PDF. The method neither rerenders the source nor adds a filename extension.                                                                          | A nonempty filename without `/`, `\` or ASCII control characters. Include `.pdf` when desired. | `'document.pdf'`.                                  |
+| HTML `data-raster` attribute | Explicitly selects a subtree for one local raster capture. This is an HTML attribute, not a `renderPDF` option. The selected subtree must satisfy the raster safety and size limits. | Add the attribute, for example `<div data-raster>...</div>`, or leave it absent.               | Absent; `fallback` determines automatic selection. |
+
+`result.toBlob()` and `result.toUint8Array()` take no parameters. They return the
+same completed PDF in different forms without another conversion. `pageCount`
+and `warnings` are read-only result metadata.
 
 ## Supported scope
 
@@ -190,6 +250,9 @@ browser tests, builds, formatting and package contents. Browser tests require an
 Chrome and use synthetic fixtures, Playwright and PDF.js; those tools never run in
 conversion code. Generated PDFs, screenshots and reports stay outside versioned
 source files.
+
+See [tests/README.md](tests/README.md) for the test commands, coverage by file,
+verification methods and remaining coverage limits.
 
 ### Local package
 

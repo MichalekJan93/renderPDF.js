@@ -34,7 +34,7 @@ function parseStaticDocument(
     )
   ) {
     throw new Error(
-      'Tento náhled přijímá pouze statické HTML bez skriptů, formulářů a externích dokumentů.',
+      'This preview accepts only static HTML without scripts, forms or external documents.',
     );
   }
   for (const element of parsed.querySelectorAll('*')) {
@@ -46,9 +46,7 @@ function parseStaticDocument(
           attribute.name,
         )
       ) {
-        throw new Error(
-          'Externí obrázky a aktivní obsah zatím tento testovací náhled nepodporuje.',
-        );
+        throw new Error('This test preview does not support external images or active content.');
       }
     }
   }
@@ -59,7 +57,7 @@ function parseStaticDocument(
       .map((element) => element.getAttribute('style'))
       .join('\n');
   if (/@import\b|(?:url|(?:-webkit-)?image-set)\s*\(|\\/i.test(css)) {
-    throw new Error('Externí zdroje v CSS zatím tento testovací náhled nepodporuje.');
+    throw new Error('This test preview does not support external CSS resources.');
   }
   return parsed;
 }
@@ -74,7 +72,7 @@ async function loadDocumentFonts(): Promise<{ fonts: RegisteredFont[]; note: str
         loadBrowserFont('/artifacts/preview/fonts/Tahoma-Regular.ttf', 'Tahoma', 400),
         loadBrowserFont('/artifacts/preview/fonts/Tahoma-Bold.ttf', 'Tahoma', 700),
       ]);
-      return { fonts, note: 'Použitý font v náhledu i PDF: Tahoma.' };
+      return { fonts, note: 'Preview and PDF font: Tahoma.' };
     } catch {
       // A repository checkout need not include the user's local system font files.
     }
@@ -84,7 +82,7 @@ async function loadDocumentFonts(): Promise<{ fonts: RegisteredFont[]; note: str
     loadBrowserFont('/fonts/NotoSans-Regular.ttf', 'Noto Sans', 400),
     loadBrowserFont('/fonts/NotoSans-Bold.ttf', 'Noto Sans', 700),
   ]);
-  return { fonts, note: 'Použitý font: Noto Sans (náhrada za nedostupnou lokální Tahomu).' };
+  return { fonts, note: 'Font: Noto Sans (substituted for unavailable local Tahoma).' };
 }
 
 /** Display and export one local static document through the existing native PDF pipeline. */
@@ -106,7 +104,7 @@ async function initializeDocument(): Promise<void> {
   // This reference changes only after a replacement file has parsed and passed validation.
   let source: HTMLElement | null = null;
   // The suggested filename follows the selected local file, without modifying the original.
-  let filename = 'informativni-vypis-konta.pdf';
+  let filename = 'account-statement.pdf';
 
   /** Parse and show supported static HTML at the exact A4 content width used for PDF layout. */
   function showDocument(
@@ -146,14 +144,14 @@ async function initializeDocument(): Promise<void> {
     filename = label.replace(/\.(?:html?|pdf)$/i, '') + '.pdf';
     name.textContent = label;
     button.disabled = false;
-    status.textContent = 'Dokument je připravený. Stáhnout PDF vytvoří PDF přímo z tohoto náhledu.';
+    status.textContent = 'The document is ready. Download PDF converts this preview directly.';
   }
 
   window.documentExperiment = {
     fonts,
     getSource: () => source,
     export: async () => {
-      if (!source) throw new Error('Nejprve otevřete HTML dokument.');
+      if (!source) throw new Error('Open an HTML document first.');
       return runExperiment(source, fonts);
     },
   };
@@ -172,15 +170,15 @@ async function initializeDocument(): Promise<void> {
   button.addEventListener('click', async () => {
     button.disabled = true;
     input.disabled = true;
-    status.textContent = 'Vytváření PDF…';
+    status.textContent = 'Creating PDF…';
     try {
-      if (!source) throw new Error('Nejprve otevřete HTML dokument.');
+      if (!source) throw new Error('Open an HTML document first.');
       // The user action exercises the same public API available to library consumers.
       const result = await renderPDF(source, { fonts });
       await result.download(filename);
-      status.textContent = `PDF vytvořeno: ${result.pageCount} stran, ${(await result.toUint8Array()).length.toLocaleString('cs')} bajtů. Text je vybíratelný.`;
+      status.textContent = `PDF created: ${result.pageCount} pages, ${(await result.toUint8Array()).length.toLocaleString('en-US')} bytes. Text is selectable.`;
     } catch (error) {
-      status.textContent = `PDF se nepodařilo vytvořit: ${error instanceof Error ? error.message : String(error)}`;
+      status.textContent = `PDF creation failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       button.disabled = source === null;
       input.disabled = false;
@@ -191,16 +189,16 @@ async function initializeDocument(): Promise<void> {
       // A plain-text copy prevents Vite from injecting its development script into source HTML.
       const response = await fetch('/artifacts/preview/current-document.txt');
       if (response.ok) {
-        showDocument(await response.text(), 'Informativni_vypis_konta.html');
+        showDocument(await response.text(), 'account-statement.html');
         return;
       }
     } catch (error) {
       // A present but unsupported source must expose its error instead of silently disappearing.
-      status.textContent = `Dokument se nepodařilo otevřít: ${error instanceof Error ? error.message : String(error)}`;
+      status.textContent = `Could not open the document: ${error instanceof Error ? error.message : String(error)}`;
       return;
     }
   }
-  status.textContent = 'Vyberte HTML soubor tlačítkem Otevřít HTML.';
+  status.textContent = 'Choose a file with Open HTML.';
 }
 
 initializeDocument().catch((error: unknown) => {

@@ -36,7 +36,7 @@ test('uploaded legacy tables download as selectable multipage PDF without split 
   const fixtureRows = Array.from({ length: 180 }, (_, index) => {
     // Fixed-width identifiers prevent one row's marker from matching a different row.
     const identifier = String(index + 1).padStart(3, '0');
-    return `<tr data-fixture-row="${identifier}"><td width="90"><font class="normal">ROW ${identifier} A</font></td><td width="85"><font class="normal">01.01.2020</font></td><td width="85"><font class="normal">31.12.2020</font></td><td width="45" align="right"><font class="normal">365</font></td><td><font class="normal">pojištění, česká diakritika</font></td><td width="90" align="right"><font class="normal">ROW ${identifier} B</font></td></tr>`;
+    return `<tr data-fixture-row="${identifier}"><td width="90"><font class="normal">ROW ${identifier} A</font></td><td width="85"><font class="normal">01.01.2020</font></td><td width="85"><font class="normal">31.12.2020</font></td><td width="45" align="right"><font class="normal">365</font></td><td><font class="normal">insurance, Unicode accents</font></td><td width="90" align="right"><font class="normal">ROW ${identifier} B</font></td></tr>`;
   }).join('\n');
   // Uncaught exceptions and print invocations indicate a broken browser-only export flow.
   const browserErrors: string[] = [];
@@ -65,10 +65,10 @@ test('uploaded legacy tables download as selectable multipage PDF without split 
     // File loading and exact font registration finish before the source becomes exportable.
     const api = (window as unknown as { documentExperiment?: DocumentExperimentApi })
       .documentExperiment;
-    return api?.getSource()?.textContent?.includes('Konec zkušebního výpisu.');
+    return api?.getSource()?.textContent?.includes('End of the test statement.');
   });
   // The public-facing button must export the selected file rather than the Phase 0 demo.
-  const button = page.getByRole('button', { name: 'Stáhnout PDF', exact: true });
+  const button = page.getByRole('button', { name: 'Download PDF', exact: true });
   await expect(button).toBeEnabled();
   // Playwright's CSS locator traverses the preview's open shadow root.
   const source = page.locator('#document-source');
@@ -141,9 +141,13 @@ test('uploaded legacy tables download as selectable multipage PDF without split 
   // These sentinels also verify diacritics and the final page after all table rows.
   const fullText = pageTexts.join('\n');
   expect(fullText.replace(/\s+/g, '')).toBe(mapping.sourceText.replace(/\s+/g, ''));
-  expect(fullText.split('Příliš žluťoučký kůň úpěl ďábelské ódy.')).toHaveLength(2);
-  expect(fullText.split('Konec zkušebního výpisu.')).toHaveLength(2);
-  expect(pageTexts.at(-1)).toContain('Konec zkušebního výpisu.');
+  expect(
+    fullText.split(
+      'Unicode accents: \u00e1\u010d\u010f\u00e9\u011b\u00ed\u0148\u00f3\u0159\u0161\u0165\u00fa\u016f\u00fd\u017e.',
+    ),
+  ).toHaveLength(2);
+  expect(fullText.split('End of the test statement.')).toHaveLength(2);
+  expect(pageTexts.at(-1)).toContain('End of the test statement.');
   for (const row of mapping.rows) {
     // Two unique markers at opposite ends expose both lost rows and row splitting.
     const firstMarker = `ROW ${row.identifier} A`;
@@ -214,11 +218,11 @@ test('active HTML is rejected without replacing the current local preview', asyn
   await input.setInputFiles({
     name: 'static.html',
     mimeType: 'text/html',
-    buffer: Buffer.from('<p>Bezpečný zkušební dokument.</p>'),
+    buffer: Buffer.from('<p>Safe test document.</p>'),
   });
   // The connected source is exposed only after validation and font loading succeed.
   const source = page.locator('#document-source');
-  await expect(source).toContainText('Bezpečný zkušební dokument.');
+  await expect(source).toContainText('Safe test document.');
   // Preserve the previous source to prove that rejecting an import is non-destructive.
   const originalMarkup = await source.evaluate((element) => element.outerHTML);
   await input.setInputFiles({
@@ -228,7 +232,7 @@ test('active HTML is rejected without replacing the current local preview', asyn
       '<script>window.documentPreviewExecuted = true;</script><p>Replacement</p>',
     ),
   });
-  await expect(page.getByRole('status')).toContainText('pouze statické HTML');
+  await expect(page.getByRole('status')).toContainText('only static HTML');
   expect(await source.evaluate((element) => element.outerHTML)).toBe(originalMarkup);
   expect(
     await page.evaluate(

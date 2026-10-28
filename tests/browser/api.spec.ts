@@ -45,7 +45,7 @@ test('public API exports a mixed invoice with explicit fonts, custom pages and a
     rows.innerHTML = Array.from({ length: 52 }, (_, index) => {
       // Fixed-width numbers ensure one row marker cannot match another row's identifier.
       const identifier = String(index + 1).padStart(3, '0');
-      return `<tr><td>ITEM ${identifier} A</td><td>Česká položka, měření a ověření</td><td>ITEM ${identifier} B</td></tr>`;
+      return `<tr><td>ITEM ${identifier} A</td><td>Unicode item, measured and checked</td><td>ITEM ${identifier} B</td></tr>`;
     }).join('');
     // This inline PNG is a real native bitmap, independent from the explicit raster boundary.
     const canvas = document.createElement('canvas');
@@ -166,8 +166,8 @@ test('public API exports a mixed invoice with explicit fonts, custom pages and a
   // Positioned PDF words may introduce extraction spaces, so compare all authored nonspaces.
   const fullText = pages.flatMap((pdfPage) => pdfPage.text.map((item) => item.text)).join('');
   expect(fullText.replace(/\s+/g, '')).toBe(setup.expectedText.replace(/\s+/g, ''));
-  expect(fullText).toContain('žluťoučký');
-  expect(fullText.split('Rastrové').length).toBe(2);
+  expect(fullText).toContain('\u00e1\u010d\u010f');
+  expect(fullText.split('Raster').length).toBe(2);
   expect(pages.reduce((sum, pdfPage) => sum + pdfPage.imagePaints, 0)).toBe(2);
   // Local raster output must stay substantially smaller than one complete page bitmap.
   for (const image of pages.flatMap((pdfPage) => pdfPage.imageSizes)) {
@@ -179,7 +179,7 @@ test('public API exports a mixed invoice with explicit fonts, custom pages and a
     3,
   );
   // The first heading begins 12px inside the root plus the custom 40px left PDF margin.
-  const heading = pages[0]!.text.find((item) => item.text.includes('Zkušební'))!;
+  const heading = pages[0]!.text.find((item) => item.text.includes('Test invoice'))!;
   expect(heading).toBeDefined();
   expect(heading.transform[4]).toBeCloseTo((40 + 12) * 0.75, 2);
   for (let index = 1; index <= 52; index += 1) {
@@ -242,7 +242,7 @@ test('public diagnostics reject unavailable fonts, missing glyphs, overflow, can
     const source = document.querySelector<HTMLElement>('#invoice')!;
     source.style.width = '600px';
     source.style.fontFamily = 'Diagnostic Sans';
-    source.replaceChildren(document.createTextNode('Český kontrolní text.'));
+    source.replaceChildren(document.createTextNode('Unicode control text.'));
     // Return structured evidence so failures cannot masquerade as a successful empty export.
     const errors: Record<string, { name: string; code: string; message: string }> = {};
     /** Capture the public diagnostic of a rejected asynchronous export.
@@ -277,7 +277,7 @@ test('public diagnostics reject unavailable fonts, missing glyphs, overflow, can
     source.textContent = 'A'.repeat(180);
     await rejection('textOverflow', () => api.renderPDF(source, { fonts: [font] }));
     source.style.width = '600px';
-    source.textContent = 'Český kontrolní text.';
+    source.textContent = 'Unicode control text.';
     // Cancellation must be caller-visible before expensive layout or PDF construction begins.
     const controller = new AbortController();
     controller.abort();
@@ -405,7 +405,7 @@ test('native JPEG resources preserve selectable text and require readable same-o
       source.style.fontFamily = 'Resource Sans';
       // Use only ordinary text plus one bitmap, with no explicit raster fallback boundary.
       const paragraph = document.createElement('p');
-      paragraph.textContent = 'Český obrázek JPEG.';
+      paragraph.textContent = 'JPEG Unicode sample: \u00e1\u010d\u010f.';
       // Fixed CSS geometry makes the expected native image paint size independently measurable.
       const image = document.createElement('img');
       image.width = 48;
@@ -453,7 +453,7 @@ test('native JPEG resources preserve selectable text and require readable same-o
           .map((item) => item.text)
           .join('')
           .replace(/\s+/g, ''),
-      ).toBe('ČeskýobrázekJPEG.');
+      ).toBe('JPEGUnicodesample:\u00e1\u010d\u010f.');
       expect(pages[0]!.imagePaints).toBe(1);
       expect(pages[0]!.imageSizes).toEqual([{ width: 48, height: 32 }]);
     }

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,81 +8,83 @@
   </head>
   <body>
     <header class="hybrid-controls">
-      <h1>RenderPDF.js · automatické rastry a stránkování</h1>
+      <h1>RenderPDF.js · automatic rasters and pagination</h1>
       <p>
-        Gradienty a vnitřní stíny nemají ruční značku pro rasterizaci. Stránky řídí také CSS zlomy.
+        Gradients and inset shadows have no manual raster markers. CSS breaks also control pages.
       </p>
       <p>
-        <a href="/tests/fixtures/document.html?empty=1">Otevřít vlastní HTML</a> ·
-        <a href="/tests/fixtures/rendering.html">Vykreslování</a>
+        <a href="/tests/fixtures/document.html?empty=1">Open your HTML</a> ·
+        <a href="/tests/fixtures/rendering.html">Rendering</a>
       </p>
-      <button id="hybrid-export" type="button" disabled>Stáhnout PDF</button>
-      <p id="hybrid-status" role="status">Načítání registrovaných fontů…</p>
+      <button id="hybrid-export" type="button" disabled>Download PDF</button>
+      <p id="hybrid-status" role="status">Loading registered fonts…</p>
     </header>
     <main id="hybrid-source">
-      <h1>Český dokument s lokálními efekty</h1>
-      <p>Nadpis a tento odstavec zůstávají nativním, vybíratelným PDF textem.</p>
+      <h1>Unicode document with local effects</h1>
+      <p>The heading and this paragraph remain native, selectable PDF text.</p>
       <div class="hybrid-gradient">
-        <strong>Automaticky zachycená karta</strong>
-        <p>Zaoblení a gradient vykreslí prohlížeč. Text má také neviditelnou vrstvu pro hledání.</p>
-        <div class="hybrid-nested">Vnořený gradient patří do stejného obrázku.</div>
+        <strong>Automatically captured card</strong>
+        <p>The browser paints the corners and gradient. Text also has an invisible search layer.</p>
+        <div class="hybrid-nested">The nested gradient belongs to the same image.</div>
       </div>
       <div class="hybrid-inset">
-        Samostatný blok s vnitřním stínem se zachytí jen ve svých mezích.
+        A separate inset-shadow block is captured only within its own bounds.
       </div>
       <section class="hybrid-new-page">
-        <h2>Nová stránka podle CSS</h2>
-        <p>Tato část má nastavený zlom před prvkem. Původní DOM zůstává souvislý.</p>
+        <h2>New page requested by CSS</h2>
+        <p>This section requests a break before its element. The source DOM remains continuous.</p>
         <p>
-          Delší odstavce se dělí pouze mezi změřenými textovými řádky. Příliš žluťoučký kůň úpěl
-          ďábelské ódy. Prohlížeč určuje zalamování, rozestupy a pozice jednotlivých slov. Delší
-          odstavce se dělí pouze mezi změřenými textovými řádky. Příliš žluťoučký kůň úpěl ďábelské
-          ódy. Prohlížeč určuje zalamování, rozestupy a pozice jednotlivých slov. Delší odstavce se
-          dělí pouze mezi změřenými textovými řádky. Příliš žluťoučký kůň úpěl ďábelské ódy.
-          Prohlížeč určuje zalamování, rozestupy a pozice jednotlivých slov.
+          Long paragraphs split only between measured text lines. Unicode accents remain readable.
+          The browser determines wrapping, spacing and the positions of individual words. Long
+          paragraphs split only between measured text lines. Unicode accents remain readable. The
+          browser determines wrapping, spacing and the positions of individual words. Long
+          paragraphs split only between measured text lines. Unicode accents remain readable. The
+          browser determines wrapping, spacing and the positions of individual words.
         </p>
         <div class="hybrid-keep">
-          <strong>Tento malý blok zůstává pohromadě</strong>
+          <strong>This small block stays together</strong>
           <p>
-            Pokud se nevejde do zbytku stránky, přesune se na další stránku díky break-inside:
+            If it does not fit the remaining space, it moves to the next page through break-inside:
             avoid.
           </p>
         </div>
         <table>
           <thead>
             <tr>
-              <th>Skupina</th>
-              <th>Česká položka</th>
-              <th>Částka</th>
+              <th>Group</th>
+              <th>Unicode item</th>
+              <th>Amount</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td rowspan="2">Společná buňka</td>
-              <td>První měření</td>
-              <td>100 Kč</td>
+              <td rowspan="2">Shared cell</td>
+              <td>First measurement</td>
+              <td>100 CZK</td>
             </tr>
             <tr>
-              <td>Druhé měření</td>
-              <td>200 Kč</td>
+              <td>Second measurement</td>
+              <td>200 CZK</td>
             </tr>
             <tr>
-              <td>Samostatná</td>
-              <td>Třetí měření</td>
-              <td>300 Kč</td>
+              <td>Separate</td>
+              <td>Third measurement</td>
+              <td>300 CZK</td>
             </tr>
             <tr>
-              <td>Samostatná</td>
-              <td>Čtvrté měření</td>
-              <td>400 Kč</td>
+              <td>Separate</td>
+              <td>Fourth measurement</td>
+              <td>400 CZK</td>
             </tr>
           </tbody>
         </table>
-        <p class="hybrid-page-end">Za tímto odstavcem následuje další vynucený zlom.</p>
+        <p class="hybrid-page-end">Another forced break follows this paragraph.</p>
       </section>
       <section>
-        <h2>Konec ukázky</h2>
-        <p>Text před i za rastry a zlomy má zůstat úplný a bez viditelných duplikátů.</p>
+        <h2>End of the example</h2>
+        <p>
+          Text before and after rasters and breaks must stay complete without visible duplicates.
+        </p>
       </section>
     </main>
     <script type="module" src="/experiments/hybrid.ts"></script>

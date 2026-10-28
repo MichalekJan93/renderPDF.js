@@ -71,15 +71,16 @@ async function initialize(): Promise<void> {
     captureRaster,
   };
   button.disabled = false;
-  status.textContent = 'Připraveno. Omezený Phase 0 experiment; nejde o obecný HTML renderer.';
+  status.textContent =
+    'Ready. Limited Phase 0 experiment; general HTML rendering is not supported.';
   button.addEventListener('click', async () => {
     button.disabled = true;
-    status.textContent = 'Vytváření PDF v prohlížeči…';
+    status.textContent = 'Creating PDF in the browser…';
     try {
       // A Blob download exercises the complete browser path without a print dialog.
       const result = await renderPDF(source, { fonts });
       await result.download('renderpdf-phase0.pdf');
-      status.textContent = `${result.pageCount} stránky, ${(await result.toUint8Array()).length.toLocaleString('cs')} bajtů. ${result.warnings.map((warning) => warning.message).join(' ')}`;
+      status.textContent = `${result.pageCount} pages, ${(await result.toUint8Array()).length.toLocaleString('en-US')} bytes. ${result.warnings.map((warning) => warning.message).join(' ')}`;
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : String(error);
     } finally {

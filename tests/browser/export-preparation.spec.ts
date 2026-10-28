@@ -30,7 +30,11 @@ test('export prepares resources once and retains late CSSOM mutation detection',
     // The small synthetic source contains selectable Czech text and one native bitmap.
     const source = document.createElement('div');
     source.id = 'preparation-source';
-    source.append(document.createTextNode('Příliš žluťoučký kůň ověřuje přípravu exportu.'));
+    source.append(
+      document.createTextNode(
+        'Export preparation preserves Unicode: \u00e1\u010d\u010f\u00e9\u011b\u00ed\u0148\u00f3\u0159\u0161\u0165\u00fa\u016f\u00fd\u017e.',
+      ),
+    );
     // Generate a local PNG without external resources or tracked fixture binaries.
     const canvas = document.createElement('canvas');
     canvas.width = 12;

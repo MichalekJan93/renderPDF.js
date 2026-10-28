@@ -14,7 +14,7 @@ test('source guards retain complete CSSOM state across repeated stable checks', 
     )) as typeof import('../../src/prepare');
     // A synthetic flex sibling can change source geometry without editing the observed subtree.
     document.body.innerHTML =
-      '<div id="guard-wrapper"><div id="guard-sibling"></div><main id="guard-source"><span>Český stabilní text.</span></main></div>';
+      '<div id="guard-wrapper"><div id="guard-sibling"></div><main id="guard-source"><span>Stable Unicode text.</span></main></div>';
     // CSSOM changes deliberately leave the stylesheet's DOM text node untouched.
     const style = document.createElement('style');
     style.textContent = `

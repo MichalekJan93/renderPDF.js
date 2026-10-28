@@ -146,9 +146,9 @@ test('automatic local fallbacks preserve native text, nested paint ownership and
     .join('')
     .replace(/\s+/g, '');
   expect(extracted).toBe(evidence.text.replace(/\s+/g, ''));
-  expect(extracted).toContain('žluťoučký');
+  expect(extracted).toContain('\u00e1\u010d\u010f');
   // Native text before and after the images prevents a bitmap-only PDF from satisfying the check.
-  expect(pages[0]!.text.some((item) => item.text.includes('Nativní'))).toBe(true);
+  expect(pages[0]!.text.some((item) => item.text.includes('Native'))).toBe(true);
   // White custom paper frames the unmodified browser root at its exact 20px page offset.
   const reference = new PNG({ width: 500, height: 400 });
   reference.data.fill(255);
@@ -187,7 +187,7 @@ test('CSS page breaks preserve avoid cards, wrapped lines and rowspan table inte
     // This paragraph is one DOM text node; browser wrapping must fragment it across PDF pages.
     const paragraph = Array.from(
       { length: 90 },
-      (_, index) => `WORD${String(index + 1).padStart(3, '0')} žluťoučký`,
+      (_, index) => `WORD${String(index + 1).padStart(3, '0')} variation`,
     ).join(' ');
     // A spanning cell covers three adjacent rows and must move together with all their text.
     const rows = Array.from({ length: 18 }, (_, index) => {
@@ -203,15 +203,15 @@ test('CSS page breaks preserve avoid cards, wrapped lines and rowspan table inte
       return `<tr data-row="${identifier}">${group}<td>ROW ${identifier} A</td><td>ROW ${identifier} B</td></tr>`;
     }).join('');
     root.innerHTML = `
-      <p>První stránka má nativní český text.</p>
+      <p>The first page contains native text.</p>
       <div style="height: 220px"></div>
-      <section id="avoid-card" class="keep-together atomic-card"><p>KEEP A začátek</p><div style="height: 76px"></div><p>KEEP B konec</p></section>
-      <p id="forced-after" class="break-after">Vynucený konec stránky.</p>
-      <h2>Za vynuceným koncem</h2>
+      <section id="avoid-card" class="keep-together atomic-card"><p>KEEP A start</p><div style="height: 76px"></div><p>KEEP B end</p></section>
+      <p id="forced-after" class="break-after">Forced end of the page.</p>
+      <h2>After the forced ending</h2>
       <p id="long-paragraph">${paragraph}</p>
-      <section id="forced-before" class="break-before"><p>Vynucená další stránka.</p></section>
-      <table><thead><tr><th>Skupina</th><th>Začátek</th><th>Konec</th></tr></thead><tbody>${rows}</tbody></table>
-      <p>Poslední český řádek je úplný.</p>`;
+      <section id="forced-before" class="break-before"><p>The next page is forced.</p></section>
+      <table><thead><tr><th>Group</th><th>Start</th><th>End</th></tr></thead><tbody>${rows}</tbody></table>
+      <p>The final Unicode line is complete.</p>`;
     return root.innerText;
   });
   // Preserve the original browser source and its exact first interval for visual evidence.
@@ -393,33 +393,33 @@ test('strict mode and unsafe effects fail explicitly while oversized avoid boxes
     }
     await rejection('strict', () => api.renderPDF(root, { ...options, fallback: 'strict' }));
     // Strict mode retains the deliberate explicit-marker workflow for safe local subtrees.
-    root.innerHTML = '<div class="card" data-raster><p>Výslovný raster ve strict režimu.</p></div>';
+    root.innerHTML = '<div class="card" data-raster><p>Explicit raster in strict mode.</p></div>';
     // This successful output later receives an independent image-paint check.
     const explicit = await api.renderPDF(root, { ...options, fallback: 'strict' });
     root.innerHTML =
-      '<div style="box-shadow: 0 2px 8px #345; padding: 12px">Vnější stín přetéká.</div>';
+      '<div style="box-shadow: 0 2px 8px #345; padding: 12px">The outer shadow extends beyond the box.</div>';
     await rejection('outerShadow', () => api.renderPDF(root, { ...options, strictCss: true }));
     root.innerHTML =
-      '<div style="backdrop-filter: blur(2px); padding: 12px">Efekt závisí na pozadí.</div>';
+      '<div style="backdrop-filter: blur(2px); padding: 12px">The effect depends on the backdrop.</div>';
     await rejection('backdrop', () => api.renderPDF(root, options));
     root.innerHTML =
-      '<div style="display: grid"><div style="grid-area: 1 / 1">První překryv</div><div style="grid-area: 1 / 1">Druhý překryv</div></div>';
+      '<div style="display: grid"><div style="grid-area: 1 / 1">First overlap</div><div style="grid-area: 1 / 1">Second overlap</div></div>';
     await rejection('overlap', () => api.renderPDF(root, options));
     // An automatic owner cannot conceal a descendant whose CSS order needs a different paint plan.
     root.innerHTML =
-      '<div style="display: flex; background: linear-gradient(90deg, #eee, #ddd)"><div style="order: 1">Nepodporované pořadí potomka.</div></div>';
+      '<div style="display: flex; background: linear-gradient(90deg, #eee, #ddd)"><div style="order: 1">Unsupported descendant order.</div></div>';
     await rejection('nestedOrder', () => api.renderPDF(root, options));
     // Overlap remains unsafe even when an ancestor otherwise qualifies as one local raster boundary.
     root.innerHTML =
-      '<div style="display: grid; background: linear-gradient(90deg, #eee, #ddd)"><p style="grid-area: 1 / 1">První vnořený překryv</p><p style="grid-area: 1 / 1">Druhý vnořený překryv</p></div>';
+      '<div style="display: grid; background: linear-gradient(90deg, #eee, #ddd)"><p style="grid-area: 1 / 1">First nested overlap</p><p style="grid-area: 1 / 1">Second nested overlap</p></div>';
     await rejection('nestedOverlap', () => api.renderPDF(root, options));
     // Fragmented inline boxes have multiple paint rectangles, not one independently captured region.
-    root.innerHTML = `<p><span style="background: linear-gradient(90deg, #eee, #ddd)">${'Rozdělený barevný český text '.repeat(12)}</span></p>`;
+    root.innerHTML = `<p><span style="background: linear-gradient(90deg, #eee, #ddd)">${'Fragmented colored Unicode text '.repeat(12)}</span></p>`;
     // Confirm the fixture actually exercises line fragmentation before expecting the specific rejection.
     const fragmentedRects = root.querySelector('span')!.getClientRects().length;
     await rejection('fragmentedInline', () => api.renderPDF(root, options));
     // Native inline backgrounds have separate line fragments rather than one filled union rectangle.
-    root.innerHTML = `<p style="width: 120px"><span style="background: red">${'Více zalomených slov '.repeat(8)}</span></p>`;
+    root.innerHTML = `<p style="width: 120px"><span style="background: red">${'Several wrapped words '.repeat(8)}</span></p>`;
     await rejection('fragmentedSolid', () => api.renderPDF(root, options));
     // Direct text and a later block can overlap even when there are no sibling element pairs.
     const originalLineHeight = root.style.lineHeight;
@@ -436,17 +436,17 @@ test('strict mode and unsafe effects fail explicitly while oversized avoid boxes
       '.native-empty-pseudo::before { content: ""; display: inline-block; width: 8px; height: 8px; background: red; }';
     document.head.append(pseudoStyle);
     root.innerHTML =
-      '<p class="native-empty-pseudo">Prázdný pseudo-element má viditelné pozadí.</p>';
+      '<p class="native-empty-pseudo">An empty pseudo-element has a visible background.</p>';
     try {
       await rejection('generatedBox', () => api.renderPDF(root, options));
     } finally {
       pseudoStyle.remove();
     }
     root.innerHTML =
-      '<table><tbody><tr><td><p>Začátek nedělitelného řádku.</p><p class="break-before">Vynucený zlom uvnitř řádku.</p></td></tr></tbody></table>';
+      '<table><tbody><tr><td><p>Start of an atomic row.</p><p class="break-before">Forced break inside a row.</p></td></tr></tbody></table>';
     await rejection('atomicBreak', () => api.renderPDF(root, options));
     // An avoid hint cannot make an arbitrarily tall normal-flow paragraph indivisible.
-    root.innerHTML = `<section class="keep-together"><p>${Array.from({ length: 100 }, (_, index) => `VELKY${String(index + 1).padStart(3, '0')} český`).join(' ')}</p></section>`;
+    root.innerHTML = `<section class="keep-together"><p>${Array.from({ length: 100 }, (_, index) => `LARGE${String(index + 1).padStart(3, '0')} sample`).join(' ')}</p></section>`;
     // Relaxing an impossible soft constraint is observable, while native paragraph lines still export.
     const oversized = await api.renderPDF(root, options);
     return {
@@ -506,11 +506,11 @@ test('default CSS omission preserves content while strictCss rejects unsupported
     const fonts = (window as unknown as { hybridFonts: RegisteredFont[] }).hybridFonts;
     root.innerHTML = `
       <div style="background: linear-gradient(90deg, #dceefe, #e6f6e7); box-shadow: 0 4px 8px #345; padding: 12px">
-        <small>Menší český text zůstává.</small>
+        <small>Smaller Unicode text remains.</small>
       </div>
       <table style="border-collapse: collapse; box-shadow: 0 4px 8px #345">
-        <tbody><tr style="background: #edf3fa"><td>První řádek.</td></tr>
-        <tr><td>Druhý řádek.</td></tr></tbody>
+        <tbody><tr style="background: #edf3fa"><td>First row.</td></tr>
+        <tr><td>Second row.</td></tr></tbody>
       </table>`;
     const markup = root.innerHTML;
     const result = await api.renderPDF(root, { fonts, format: 'A4', margin: 24 });
@@ -533,7 +533,7 @@ test('default CSS omission preserves content while strictCss rejects unsupported
   expect(pages).toHaveLength(1);
   expect(pages[0]!.imagePaints).toBe(1);
   const text = pages[0]!.text.map((item) => item.text).join('');
-  for (const phrase of ['Menší český text zůstává.', 'První řádek.', 'Druhý řádek.']) {
+  for (const phrase of ['Smaller Unicode text remains.', 'First row.', 'Second row.']) {
     expect(text).toContain(phrase);
   }
 });
@@ -575,7 +575,7 @@ test('the hybrid demo downloads a complete mixed PDF through its actual button',
       .join('')
       .replace(/\s+/g, ''),
   ).toBe(sourceText.replace(/\s+/g, ''));
-  await expect(page.locator('#hybrid-status')).toContainText('2 lokální rastrové oblasti');
+  await expect(page.locator('#hybrid-status')).toContainText('2 local raster regions');
   await expect(button).toBeEnabled();
   expect(await source.evaluate((element) => element.outerHTML)).toBe(markup);
   expect(browserErrors).toEqual([]);

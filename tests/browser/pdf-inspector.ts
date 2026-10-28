@@ -16,7 +16,7 @@ export interface InspectedText {
 
 /** Independent structural and visual evidence for one generated PDF page. */
 export interface InspectedPage {
-  /** Raster verification dimensions in CSS pixels at 96 DPI. */
+  /** Bitmap dimensions at the requested resolution; default is one pixel per CSS pixel. */
   width: number;
   height: number;
   /** Rendered PDF page as a self-contained PNG. */
@@ -31,8 +31,9 @@ export interface InspectedPage {
 
 /** Render and inspect a PDF through an implementation independent of its writer.
  * @param bytes Complete generated PDF bytes serialized across the test boundary.
+ * @param pixelRatio Verification pixels per CSS pixel; defaults to 1 (96 DPI).
  */
-export async function inspectPdf(bytes: number[]): Promise<InspectedPage[]> {
+export async function inspectPdf(bytes: number[], pixelRatio = 1): Promise<InspectedPage[]> {
   // Strict parsing prevents a malformed PDF from passing through error recovery.
   const loadingTask = getDocument({ data: Uint8Array.from(bytes), stopAtErrors: true });
   // Keep the loading task as the public lifecycle owner of its worker resources.
@@ -44,7 +45,7 @@ export async function inspectPdf(bytes: number[]): Promise<InspectedPage[]> {
       // Public PDF.js APIs provide both extraction and graphics operations.
       const page = await document.getPage(index);
       // The PDF writer converts CSS pixels to points using 0.75.
-      const viewport = page.getViewport({ scale: 1 / 0.75 });
+      const viewport = page.getViewport({ scale: pixelRatio / 0.75 });
       // A detached canvas avoids affecting the source browser document.
       const canvas = window.document.createElement('canvas');
       canvas.width = Math.ceil(viewport.width);

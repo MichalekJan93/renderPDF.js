@@ -8,6 +8,9 @@ import type { snapshotLayout } from '../../src/layout';
 import type { RegisteredFont } from '../../src/index';
 import type { InspectedPage } from './pdf-inspector';
 
+/** Match the renderer's default local raster resolution without downsampling glyph edges. */
+const rasterPixelRatio = 2;
+
 /** Browser fixture contract exposed only for reproducible Phase 0 research. */
 interface ProbeApi {
   /** Run the experiment with optional extraction text in raster regions. */
@@ -69,16 +72,32 @@ function perceptualMismatchRatio(actual: PNG, expected: PNG, difference?: PNG): 
  * @param page Independently rendered PDF page dimensions.
  * @param start Root-relative source interval start in CSS pixels.
  * @param end Root-relative source interval end in CSS pixels.
+ * @param pixelRatio Physical verification pixels per CSS pixel.
  */
-function referencePage(source: PNG, page: InspectedPage, start: number, end: number): PNG {
+function referencePage(
+  source: PNG,
+  page: InspectedPage,
+  start: number,
+  end: number,
+  pixelRatio = 1,
+): PNG {
   // White is the PDF page background; source pixels begin at the explicit 24px margins.
   const reference = new PNG({ width: page.width, height: page.height });
   reference.data.fill(255);
   // Reference bitmaps store whole pixels; fractional source cuts round to the nearest pixel.
-  const sourceStart = Math.round(start);
+  const sourceStart = Math.round(start * pixelRatio);
   // The final interval can be shorter than the A4 content box.
-  const height = Math.min(Math.round(end - start), source.height - sourceStart);
-  PNG.bitblt(source, reference, 0, sourceStart, source.width, height, 24, 24);
+  const height = Math.min(Math.round((end - start) * pixelRatio), source.height - sourceStart);
+  PNG.bitblt(
+    source,
+    reference,
+    0,
+    sourceStart,
+    source.width,
+    height,
+    24 * pixelRatio,
+    24 * pixelRatio,
+  );
   return reference;
 }
 
@@ -88,11 +107,31 @@ function referencePage(source: PNG, page: InspectedPage, start: number, end: num
  * @param y Region's vertical CSS pixel position.
  * @param width Region's CSS pixel width.
  * @param height Region's CSS pixel height.
+ * @param pixelRatio Physical verification pixels per CSS pixel.
  */
-function crop(image: PNG, x: number, y: number, width: number, height: number): PNG {
+function crop(
+  image: PNG,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  pixelRatio = 1,
+): PNG {
   // Pixel rounding is shared by actual/reference to avoid inventing geometry differences.
-  const region = new PNG({ width: Math.round(width), height: Math.round(height) });
-  PNG.bitblt(image, region, Math.round(x), Math.round(y), region.width, region.height, 0, 0);
+  const region = new PNG({
+    width: Math.round(width * pixelRatio),
+    height: Math.round(height * pixelRatio),
+  });
+  PNG.bitblt(
+    image,
+    region,
+    Math.round(x * pixelRatio),
+    Math.round(y * pixelRatio),
+    region.width,
+    region.height,
+    0,
+    0,
+  );
   return region;
 }
 
@@ -112,11 +151,44 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
   const originalMarkup = await source.evaluate((element) => element.outerHTML);
   // Playwright clips the element from Chromium's real rendering surface.
   const sourcePng = PNG.sync.read(await source.screenshot());
+  // A separate browser surface matches the 2x capture while native-text checks stay at 96 DPI.
+  const rasterPage = await browser.newPage({
+    deviceScaleFactor: rasterPixelRatio,
+    viewport: page.viewportSize()!,
+  });
+  let rasterSourcePng: PNG;
+  let rasterReferenceBounds: { x: number; y: number; width: number; height: number }[];
+  try {
+    await rasterPage.goto(page.url());
+    await rasterPage.waitForFunction(() =>
+      Boolean((window as unknown as { phase0?: ProbeApi }).phase0),
+    );
+    const rasterSource = rasterPage.locator('#source');
+    expect(await rasterSource.evaluate((element) => element.outerHTML)).toBe(originalMarkup);
+    // Equal outer dimensions alone could hide wrapping differences under the fixture's min-height.
+    rasterReferenceBounds = await rasterSource.evaluate((element) => {
+      const origin = element.getBoundingClientRect();
+      return Array.from(element.querySelectorAll('[data-raster]'), (region) => {
+        const bounds = region.getBoundingClientRect();
+        return {
+          x: bounds.x - origin.x,
+          y: bounds.y - origin.y,
+          width: bounds.width,
+          height: bounds.height,
+        };
+      });
+    });
+    rasterSourcePng = PNG.sync.read(await rasterSource.screenshot());
+  } finally {
+    await rasterPage.close();
+  }
+  expect(rasterSourcePng.width).toBe(sourcePng.width * rasterPixelRatio);
+  expect(rasterSourcePng.height).toBe(sourcePng.height * rasterPixelRatio);
   page.on('request', (request) => {
     if (/^https?:/.test(request.url())) exportRequests.push(request.url());
   });
   // Browser-only generation and PDF.js inspection share no writer internals.
-  const evidence = await page.evaluate(async () => {
+  const evidence = await page.evaluate(async (pixelRatio) => {
     // The typed experiment fixture is deliberately separate from a public library API.
     const api = (window as unknown as { phase0: ProbeApi }).phase0;
     // Record a local timing baseline without imposing an invented performance target.
@@ -133,6 +205,8 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
     )) as typeof import('./pdf-inspector');
     // Independent PDF.js parsing yields both pixels and selectable text objects.
     const pages = await inspector.inspectPdf(Array.from(result.bytes));
+    // Render the same bytes at native capture resolution for bounded raster comparisons only.
+    const rasterPages = await inspector.inspectPdf(Array.from(result.bytes), pixelRatio);
     // Serialize geometry only; live element references are intentionally omitted.
     const operations = result.snapshot.operations.map((operation) => ({
       kind: operation.kind,
@@ -152,6 +226,7 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
       blobType: result.blob.type,
       blobSize: result.blob.size,
       pages,
+      rasterPages,
       slices: result.slices,
       operations,
       warnings: result.snapshot.warnings,
@@ -163,7 +238,13 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
         height: typographyBounds.height,
       },
     };
-  });
+  }, rasterPixelRatio);
+  // Both resolutions must describe the same CSS layout before comparing their pixels.
+  expect(rasterReferenceBounds).toEqual(
+    evidence.operations
+      .filter((operation) => operation.kind === 'raster')
+      .map((operation) => operation.bounds),
+  );
   // Preserve raw evidence before assertions so structural failures remain reviewable.
   await writeFile(testInfo.outputPath('experiment.pdf'), Buffer.from(evidence.bytes));
   await writeFile(testInfo.outputPath('source.png'), PNG.sync.write(sourcePng));
@@ -334,6 +415,23 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
         PNG.sync.write(referenceTypography),
       );
     }
+    // Keep the original 96-DPI page and typography gates; compare rasters at matching 192 DPI.
+    const rasterActual = decodePng(evidence.rasterPages[index]!.png);
+    const rasterReference = referencePage(
+      rasterSourcePng,
+      evidence.rasterPages[index]!,
+      slice.start,
+      slice.end,
+      rasterPixelRatio,
+    );
+    await writeFile(
+      testInfo.outputPath(`raster-pdf-page-${index + 1}.png`),
+      PNG.sync.write(rasterActual),
+    );
+    await writeFile(
+      testInfo.outputPath(`raster-browser-page-${index + 1}.png`),
+      PNG.sync.write(rasterReference),
+    );
     for (const operation of evidence.operations) {
       if (
         operation.kind !== 'raster' ||
@@ -345,19 +443,21 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
       const bounds = operation.bounds;
       // Compare identical bounded samples using both raw and antialias-aware metrics.
       const actualRaster = crop(
-        actual,
+        rasterActual,
         24 + bounds.x,
         24 + bounds.y - slice.start,
         bounds.width,
         bounds.height,
+        rasterPixelRatio,
       );
       // Browser pixels preserve the exact region selected for the local raster fallback.
       const referenceRaster = crop(
-        reference,
+        rasterReference,
         24 + bounds.x,
         24 + bounds.y - slice.start,
         bounds.width,
         bounds.height,
+        rasterPixelRatio,
       );
       rasterMismatchRatios.push(mismatchRatio(actualRaster, referenceRaster));
       perceptualRasterMismatchRatios.push(perceptualMismatchRatio(actualRaster, referenceRaster));
@@ -403,6 +503,8 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
     JSON.stringify(
       {
         chromium: browser.version(),
+        pageVerificationDpi: 96,
+        rasterVerificationDpi: 96 * rasterPixelRatio,
         bytes: evidence.bytes.length,
         exportElapsedMs: evidence.exportElapsedMs,
         textLineCount: evidence.operations.filter((operation) => operation.kind === 'text').length,

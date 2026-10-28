@@ -143,7 +143,12 @@ separately. Packaging/reinstallation instructions are in its README.
 | `public/fonts/`                                                                                                                                                            | Explicit licensed Noto/Roboto fixture fonts and original third-party license notices.              |
 
 PDF.js normally renders at `1 / 0.75` scale so one CSS reference pixel equals
-0.75 PDF points. Fitted-output tests apply the measured fit scale to their
+0.75 PDF points. Phase 0 retains its 96-DPI page, typography and comparator-sentinel
+checks, but compares bounded local rasters at their native 2x resolution (192 DPI).
+A separate device-scale-2 browser reference and PDF.js scale `2 / 0.75` avoid
+comparing downsampled raster text against directly rasterized 96-DPI browser text.
+CSS crop coordinates and margins scale together; no alignment, blur, fixture-text
+changes or tolerance increases are applied. Fitted-output tests apply the measured fit scale to their
 browser reference. Comparisons preserve coordinates; tests do not align or blur
 images to improve a score.
 

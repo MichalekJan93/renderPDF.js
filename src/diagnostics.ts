@@ -7,6 +7,7 @@ export type RenderErrorCode =
   | 'MISSING_GLYPH'
   | 'UNSUPPORTED_CSS'
   | 'UNSUPPORTED_ELEMENT'
+  | 'UNSUPPORTED_IMAGE'
   | 'RESOURCE_LOAD_FAILED'
   | 'SOURCE_CHANGED'
   | 'SOURCE_OVERFLOW'
@@ -37,7 +38,9 @@ export interface RenderWarning {
     | 'TEXT_METRICS_APPROXIMATED'
     | 'RASTER_FALLBACK'
     | 'RASTER_TEXT_OMITTED'
-    | 'BREAK_AVOID_RELAXED';
+    | 'BREAK_AVOID_RELAXED'
+    | 'SOURCE_VERIFICATION_REDUCED'
+    | 'FONT_SUBSTITUTED';
   /** Explanation of the behavior and its relevant fidelity limit. */
   readonly message: string;
 }

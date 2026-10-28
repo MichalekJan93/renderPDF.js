@@ -1,4 +1,5 @@
 import { RenderPDFError } from './diagnostics.js';
+import { computedStyle, isHtmlElement } from './dom.js';
 import type { Bounds, LayoutSnapshot } from './types.js';
 
 /** Displays whose vertical border-box boundaries can be mapped without inventing line fragments. */
@@ -73,7 +74,7 @@ function hasFragmentableBox(
   element: HTMLElement,
 ): boolean {
   // Hidden siblings do not supply page content or break boundaries.
-  const style = getComputedStyle(element);
+  const style = computedStyle(element);
   // Zero-size elements can request forced boundaries separately, but cannot form a keep-together pair.
   const bounds = element.getBoundingClientRect();
   return (
@@ -95,9 +96,9 @@ function blockSibling(
   let sibling =
     direction === 'previous' ? element.previousElementSibling : element.nextElementSibling;
   while (sibling) {
-    if (!(sibling instanceof HTMLElement)) return undefined;
+    if (!isHtmlElement(sibling)) return undefined;
     // A visible inline sibling has no single block boundary for this collector to join.
-    const style = getComputedStyle(sibling);
+    const style = computedStyle(sibling);
     if (style.display !== 'none' && style.visibility === 'visible') {
       return hasFragmentableBox(sibling) ? sibling : undefined;
     }
@@ -128,15 +129,15 @@ function joinedBounds(
 
 /** Collect the supported CSS page-break subset from existing measured browser geometry. */
 export function collectPageBreaks(
-  /** Connected current-document root; collection leaves its source DOM unchanged. */
+  /** Connected source root; collection leaves its document's DOM unchanged. */
   root: HTMLElement,
   /** Ordered display list identifying intrinsic raster boundaries and source extent. */
   snapshot: LayoutSnapshot,
 ): Pick<LayoutSnapshot, 'forcedBreaks' | 'avoidBreakBounds'> {
-  if (!root.isConnected || root.ownerDocument !== document) {
+  if (!root.isConnected || !root.ownerDocument.defaultView) {
     throw new RenderPDFError(
       'INVALID_SOURCE',
-      'CSS page-break collection requires a connected source in the current document.',
+      'CSS page-break collection requires a connected source in a live document.',
     );
   }
   // Every boundary is expressed relative to the same source border box as text and images.
@@ -151,9 +152,9 @@ export function collectPageBreaks(
   // Page-edge duplicates and ordering are normalized by the pure pagination stage.
   const forcedBreaks: number[] = [];
   for (const element of [root, ...root.querySelectorAll('*')]) {
-    if (!(element instanceof HTMLElement)) continue;
+    if (!isHtmlElement(element)) continue;
     // Visibility and display are resolved by the browser, including hidden ancestor effects on size.
-    const style = getComputedStyle(element);
+    const style = computedStyle(element);
     if (style.display === 'none' || style.visibility !== 'visible') continue;
     // An element hidden by an ancestor has no layout rectangle even if its own display is block.
     const rectangle = element.getBoundingClientRect();

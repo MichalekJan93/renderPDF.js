@@ -1,4 +1,5 @@
 import { RenderPDFError } from './diagnostics.js';
+import { isHtmlTag } from './dom.js';
 
 // Self-contained raster backgrounds cannot depend on SVG resources or export-time requests.
 const INLINE_BITMAP = /^data:image\/(?:png|jpeg|gif|webp|avif);base64,[a-z\d+/=\s]+$/i;
@@ -85,7 +86,7 @@ export function assertAutomaticRasterBoundary(
 ): void {
   // Inline fragments and table internals depend on formatting context outside their own box.
   if (
-    !(element instanceof HTMLImageElement) &&
+    !isHtmlTag(element, 'img') &&
     !['block', 'flow-root', 'inline-block', 'flex', 'inline-flex', 'grid', 'inline-grid'].includes(
       style.display,
     )

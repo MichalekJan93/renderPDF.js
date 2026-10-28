@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { RegisteredFont } from '../src/api-types';
-import { registerFont, validateRegisteredFonts } from '../src/fonts';
+import { registerFont, resolveRegisteredFont, validateRegisteredFonts } from '../src/fonts';
 
 /** Only descriptors participate in registration collision checks. */
 type BrowserFontDescriptor = Pick<FontFace, 'family' | 'weight' | 'style'>;
@@ -20,6 +20,49 @@ function sfntProgram(tables = ['head'], signature = 0x00010000): Uint8Array {
     bytes.set(new TextEncoder().encode(tag), 12 + index * 16);
   }
   return bytes;
+}
+
+/** Build one complete synthetic fvar directory entry for default-instance policy tests. */
+function variableProgram(): Uint8Array {
+  // The mock browser accepts this minimal table; no font glyphs are needed by unit tests.
+  const bytes = new Uint8Array(12 + 16 * 2 + 16 + 40);
+  bytes.set(sfntProgram(['head', 'fvar']));
+  const directory = new DataView(bytes.buffer);
+  const offset = 12 + 16 * 2;
+  directory.setUint32(12 + 16 + 8, offset);
+  directory.setUint32(12 + 16 + 12, 56);
+  directory.setUint16(offset + 4, 16);
+  directory.setUint16(offset + 8, 2);
+  directory.setUint16(offset + 10, 20);
+  bytes.set(new TextEncoder().encode('wght'), offset + 16);
+  directory.setInt32(offset + 20, 100 * 65536);
+  directory.setInt32(offset + 24, 400 * 65536);
+  directory.setInt32(offset + 28, 900 * 65536);
+  // A width axis proves that CSS font-stretch cannot select another outline silently.
+  bytes.set(new TextEncoder().encode('wdth'), offset + 36);
+  directory.setInt32(offset + 40, 75 * 65536);
+  directory.setInt32(offset + 44, 100 * 65536);
+  directory.setInt32(offset + 48, 100 * 65536);
+  return bytes;
+}
+
+/** Supply the computed CSS properties needed by exact-family face matching. */
+function fontStyle(
+  weight: number,
+  family = 'Owned Sans',
+  overrides: Partial<CSSStyleDeclaration> = {},
+): CSSStyleDeclaration {
+  return Object.assign(
+    {
+      fontFamily: family,
+      fontWeight: String(weight),
+      fontStyle: 'normal',
+      fontVariationSettings: 'normal',
+      fontStretch: '100%',
+      getPropertyValue: () => 'none',
+    },
+    overrides,
+  ) as unknown as CSSStyleDeclaration;
 }
 
 /** Install a fresh document-scoped font loader without requiring a DOM test environment. */
@@ -160,6 +203,53 @@ describe('explicit font registration', () => {
       registerFont({ family: 'Static OTF', data: sfntProgram(['CFF '], 0x4f54544f) }),
     ).resolves.toMatchObject({ family: 'Static OTF' });
     expect(Array.from(browser.faces)[0]!.family).toBe('Static OTF');
+  });
+
+  it('accepts only the default variable instance and strict base64 spellings', async () => {
+    installFontBrowser();
+    // The exact same bytes may arrive as raw bytes, bare base64 or a font data URL.
+    const bytes = variableProgram();
+    const base64 = Buffer.from(bytes).toString('base64');
+    const font = await registerFont({ family: 'Variable Sans', data: base64 });
+    expect(
+      await registerFont({ family: 'Variable Sans', data: `data:font/ttf;base64,${base64}` }),
+    ).toBe(font);
+    expect(font.bytes).toEqual(bytes);
+    expect(resolveRegisteredFont(fontStyle(400, 'Variable Sans'), [font])).toBe(font);
+    expect(() =>
+      resolveRegisteredFont(
+        fontStyle(400, 'Variable Sans', { fontVariationSettings: '"wdth" 75' }),
+        [font],
+      ),
+    ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_CSS' }));
+    expect(() =>
+      resolveRegisteredFont(fontStyle(400, 'Variable Sans', { fontStretch: '75%' }), [font]),
+    ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_CSS' }));
+    await expect(
+      registerFont({ family: 'Variable Bold', weight: 700, data: bytes }),
+    ).rejects.toMatchObject({ code: 'FONT_LOAD_FAILED' });
+    for (const data of ['a', 'AAAA?', 'data:text/plain;base64,AAAA', 'AAAA=']) {
+      await expect(registerFont({ family: 'Invalid Base64', data })).rejects.toMatchObject({
+        code: 'INVALID_OPTIONS',
+      });
+    }
+  });
+
+  it('selects available weights using CSS order without substituting another family', () => {
+    // An owned 400/700 pair resolves 600 and bolder-computed 700 to the same bold program.
+    const regular = { family: 'Owned Sans', weight: 400, style: 'normal' } as RegisteredFont;
+    const medium = { family: 'Owned Sans', weight: 500, style: 'normal' } as RegisteredFont;
+    const bold = { family: 'Owned Sans', weight: 700, style: 'normal' } as RegisteredFont;
+    expect(resolveRegisteredFont(fontStyle(600), [regular, bold])).toBe(bold);
+    expect(resolveRegisteredFont(fontStyle(400), [medium, bold])).toBe(medium);
+    expect(resolveRegisteredFont(fontStyle(500), [regular, bold])).toBe(regular);
+    expect(resolveRegisteredFont(fontStyle(450), [regular, medium, bold])).toBe(medium);
+    expect(() =>
+      resolveRegisteredFont(fontStyle(600, 'Missing, Owned Sans'), [regular, bold]),
+    ).toThrow(expect.objectContaining({ code: 'MISSING_FONT' }));
+    expect(() => resolveRegisteredFont(fontStyle(900), [regular, bold])).toThrow(
+      expect.objectContaining({ code: 'MISSING_FONT' }),
+    );
   });
 
   it('requires owned current-document handles and detects removed faces or later external conflicts', async () => {

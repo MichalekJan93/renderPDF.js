@@ -1,7 +1,35 @@
 import { RenderPDFError, type RenderWarning } from './diagnostics.js';
+import { computedStyle, isHtmlElement, isHtmlTag, isShadowRoot } from './dom.js';
+import { resolveRegisteredFont } from './fonts.js';
 import { assertAutomaticRasterBoundary, automaticRasterReason } from './planner.js';
+import {
+  collapsedTableOwner,
+  measureCollapsedTableBorders,
+  validateCollapsedTablePart,
+} from './table-borders.js';
+import type { CollapsedTablePaint } from './table-borders.js';
 import type { RegisteredFont } from './api-types.js';
-import type { Bounds, LayoutSnapshot, PaintOperation, TextOperation } from './types.js';
+import type {
+  Bounds,
+  BoxOperation,
+  LayoutSnapshot,
+  PaintOperation,
+  TableHeader,
+  TextOperation,
+} from './types.js';
+
+/** Grapheme boundaries keep Unicode clusters intact across browser line measurements. */
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+/** Strong RTL letters need their own shaping run when adjacent to LTR text or digits. */
+const rtlGrapheme = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
+const strongGrapheme = /[\p{L}\p{N}]/u;
+
+/** Reuse exact loaded-face metrics within one synchronous measurement only. */
+interface TextMetricsCache {
+  context: CanvasRenderingContext2D;
+  fonts: Map<string, { ascent: number; descent: number }>;
+}
 
 /** Translate viewport geometry into the single root-relative CSS pixel system.
  * @param rectangle Browser-calculated viewport rectangle.
@@ -29,12 +57,11 @@ function composedParent(element: HTMLElement): HTMLElement | null {
   // A shadow-root source still inherits clipping and transforms from its host.
   const tree = element.getRootNode();
   return (
-    element.parentElement ??
-    (tree instanceof ShadowRoot && tree.host instanceof HTMLElement ? tree.host : null)
+    element.parentElement ?? (isShadowRoot(tree) && isHtmlElement(tree.host) ? tree.host : null)
   );
 }
 
-/** Reject unsafe CSS while allowing configured decorative omissions.
+/** Reject CSS whose paint order or appearance this isolated experiment cannot reproduce.
  * @param element Source element inspected without modifying its styles.
  * @param style Browser-computed style for the element.
  * @param allowLocalRasterEffects Whether a checked automatic region owns the supported local effects.
@@ -43,11 +70,12 @@ function validateVectorStyle(
   element: HTMLElement,
   style: CSSStyleDeclaration,
   allowLocalRasterEffects = false,
+  collapsed = false,
   /** Whether unsupported decorative CSS is an error rather than an omitted effect. */
   strictCss = false,
 ): void {
   // Chromium clips replaced image content to its own box by default; fill embedding matches it.
-  const replacedImage = element instanceof HTMLImageElement;
+  const replacedImage = isHtmlTag(element, 'img');
   // These properties require a stacking, clipping, or effects planner beyond this supported subset.
   const unsupported = [
     style.position !== 'static' && `position: ${style.position}`,
@@ -60,13 +88,12 @@ function validateVectorStyle(
     style.clipPath !== 'none' && 'clip-path',
     style.maskImage !== 'none' && 'mask-image',
     style.backgroundImage !== 'none' && !allowLocalRasterEffects && 'background-image',
-    strictCss && style.boxShadow !== 'none' && !allowLocalRasterEffects && 'box-shadow',
+    style.boxShadow !== 'none' && !allowLocalRasterEffects && strictCss && 'box-shadow',
     style.borderRadius !== '0px' && !allowLocalRasterEffects && 'border-radius',
     style.overflowX !== 'visible' && !(replacedImage && style.overflowX === 'clip') && 'overflow-x',
     style.overflowY !== 'visible' && !(replacedImage && style.overflowY === 'clip') && 'overflow-y',
     style.cssFloat !== 'none' && 'float',
     style.order !== '0' && 'order',
-    style.direction !== 'ltr' && 'direction',
     style.writingMode !== 'horizontal-tb' && 'writing-mode',
     style.textShadow !== 'none' && 'text-shadow',
     style.textDecorationLine !== 'none' && 'text-decoration',
@@ -91,7 +118,7 @@ function validateVectorStyle(
   // Generated content has geometry outside this experiment's DOM text traversal.
   for (const pseudo of ['::before', '::after']) {
     // An absent pseudo element reports either none or normal in Chromium.
-    const content = getComputedStyle(element, pseudo).content;
+    const content = computedStyle(element, pseudo).content;
     if (content !== 'none' && content !== 'normal') {
       unsupported.push(`generated content ${pseudo}`);
     }
@@ -102,10 +129,10 @@ function validateVectorStyle(
       `Unsupported CSS on ${element.tagName}: ${unsupported.join(', ')}. Use a bounded data-raster subtree when safe.`,
     );
   }
-  if (strictCss && element instanceof HTMLTableElement && style.borderCollapse !== 'separate') {
+  if (isHtmlTag(element, 'table') && !['separate', 'collapse'].includes(style.borderCollapse)) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
-      'Native table snapshots require separate borders; collapsed borders are unsupported.',
+      'Native table snapshots require separate or collapsed borders.',
     );
   }
   if (
@@ -126,11 +153,13 @@ function validateVectorStyle(
   const colors = sides.map((side) => style[`border${side}Color`]);
   // Border styles other than solid cannot be approximated by one rectangle.
   const styles = sides.map((side) => style[`border${side}Style`]);
+  if (collapsed) validateCollapsedTablePart(element, style);
   if (
-    widths.some((width) => width !== widths[0]) ||
-    (widths[0] !== '0px' &&
-      (colors.some((color) => color !== colors[0]) ||
-        styles.some((borderStyle) => borderStyle !== 'solid')))
+    !collapsed &&
+    (widths.some((width) => width !== widths[0]) ||
+      (widths[0] !== '0px' &&
+        (colors.some((color) => color !== colors[0]) ||
+          styles.some((borderStyle) => borderStyle !== 'solid'))))
   ) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
@@ -158,7 +187,7 @@ function validateVectorStyle(
  */
 function validateDisplay(element: HTMLElement, style: CSSStyleDeclaration): void {
   if (
-    !(element instanceof HTMLImageElement) &&
+    !isHtmlTag(element, 'img') &&
     ![
       'block',
       'flow-root',
@@ -188,92 +217,93 @@ function validateDisplay(element: HTMLElement, style: CSSStyleDeclaration): void
  * @param node Text node whose parent provides the effective font and color.
  * @param origin Source root's viewport rectangle.
  * @param fonts Exact registered faces available to the PDF writer.
- * @param context Canvas context used only to estimate font baseline metrics.
+ * @param cache Canvas font metrics already checked during this synchronous snapshot.
  * @param invisible Whether text belongs to an already rasterized subtree.
  */
 function measureText(
   node: Text,
   origin: DOMRect,
   fonts: readonly RegisteredFont[],
-  context: CanvasRenderingContext2D,
+  cache: TextMetricsCache,
   invisible: boolean,
 ): TextOperation[] {
   // A detached text node has no browser-resolved font or meaningful geometry.
   const parent = node.parentElement;
   if (!parent || !node.data.replace(/[\t\n\r\f ]+/g, '')) return [];
   // All runs of this text node share the parent's computed font face.
-  const style = getComputedStyle(parent);
-  // Normalize a quoted family name while retaining the first actual CSS choice.
-  const family = style.fontFamily
-    .split(',')[0]
-    ?.trim()
-    .replace(/^['"]|['"]$/g, '');
-  // Browser computed weights are numeric even when the authored value is bold.
-  const weight = Number(style.fontWeight);
-  // Only explicitly supplied faces may be mapped to PDF glyphs.
-  const face = fonts.find(
-    (font) =>
-      font.family.toLowerCase() === family?.toLowerCase() &&
-      font.weight === weight &&
-      font.style === style.fontStyle,
-  );
-  if (!face)
-    throw new RenderPDFError(
-      'MISSING_FONT',
-      `No exact registered font face for ${style.fontFamily} ${style.fontWeight} ${style.fontStyle}.`,
-    );
+  const style = computedStyle(parent);
+  // Browser and PDF face selection share CSS weight matching without accepting unknown families.
+  const face = resolveRegisteredFont(style, fonts);
   if (
-    style.direction !== 'ltr' ||
     style.writingMode !== 'horizontal-tb' ||
     style.textTransform !== 'none' ||
     style.whiteSpace !== 'normal' ||
+    node.data.includes('\u00ad') ||
+    style.hyphens === 'auto' ||
     (style.letterSpacing !== 'normal' && style.letterSpacing !== '0px') ||
     (style.wordSpacing !== 'normal' && style.wordSpacing !== '0px') ||
-    style.fontVariantCaps !== 'normal'
+    style.fontVariantCaps !== 'normal' ||
+    style.fontVariantAlternates !== 'normal' ||
+    style.fontVariantLigatures !== 'normal' ||
+    style.fontVariantNumeric !== 'normal' ||
+    style.fontVariantEastAsian !== 'normal' ||
+    style.fontVariantPosition !== 'normal' ||
+    style.fontFeatureSettings !== 'normal' ||
+    style.fontVariationSettings !== 'normal' ||
+    (style.fontStretch !== '100%' && style.fontStretch !== 'normal') ||
+    (style.fontSizeAdjust !== 'none' && style.fontSizeAdjust !== undefined) ||
+    !['auto', 'geometricPrecision'].includes(style.textRendering)
   ) {
     throw new RenderPDFError(
       'UNSUPPORTED_CSS',
-      'Unsupported CSS: text supports only untransformed horizontal LTR text with normal whitespace, spacing, and letter case.',
+      'Unsupported CSS: text requires horizontal layout with normal whitespace, spacing, font variants and OpenType features, without automatic hyphenation or soft hyphens.',
     );
   }
   // FontFaceSet confirms this exact registered face has finished loading.
   const fontSize = Number.parseFloat(style.fontSize);
   // Canvas font metrics approximate a baseline that Range does not expose.
   const fontDescription = `${face.style} ${face.weight} ${fontSize}px "${face.family}"`;
-  // FontFaceSet.check alone also succeeds for unknown families resolved through fallback.
-  const loadedFace = Array.from(document.fonts).some((browserFace) => {
-    // Normalize author-provided aliases before comparing the explicit face contract.
-    const browserWeight =
-      browserFace.weight === 'normal'
-        ? 400
-        : browserFace.weight === 'bold'
-          ? 700
-          : Number(browserFace.weight);
-    return (
-      browserFace.family.replace(/^['"]|['"]$/g, '').toLowerCase() === face.family.toLowerCase() &&
-      browserWeight === face.weight &&
-      browserFace.style === face.style &&
-      browserFace.status === 'loaded'
-    );
-  });
-  if (!loadedFace || !document.fonts.check(fontDescription, node.data))
-    throw new RenderPDFError('MISSING_FONT', `Browser font is not loaded: ${fontDescription}.`);
-  context.font = fontDescription;
-  // Font bounding metrics cover accents consistently across lines, unlike actual ink bounds.
-  const metrics = context.measureText(node.data);
-  // The browser's em-box ascent and descent are preferable to guessing from font size.
-  const ascent = metrics.fontBoundingBoxAscent;
-  // Range height is rounded by Chromium, so center the metric box within it.
-  const descent = metrics.fontBoundingBoxDescent;
-  if (!Number.isFinite(ascent) || !Number.isFinite(descent))
-    throw new RenderPDFError(
-      'UNSUPPORTED_CSS',
-      'Font bounding metrics are unavailable in this browser.',
-    );
-  // Grapheme boundaries preserve surrogate pairs and combining Czech/Latin marks.
-  const segments = new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(node.data);
+  let metrics = cache.fonts.get(fontDescription);
+  if (!metrics) {
+    // FontFaceSet.check alone also succeeds for unknown families resolved through fallback.
+    const loadedFace = Array.from(node.ownerDocument.fonts).some((browserFace) => {
+      // Normalize author-provided aliases before comparing the explicit face contract.
+      const browserWeight =
+        browserFace.weight === 'normal'
+          ? 400
+          : browserFace.weight === 'bold'
+            ? 700
+            : Number(browserFace.weight);
+      return (
+        browserFace.family.replace(/^['"]|['"]$/g, '').toLowerCase() ===
+          face.family.toLowerCase() &&
+        browserWeight === face.weight &&
+        browserFace.style === face.style &&
+        browserFace.status === 'loaded'
+      );
+    });
+    if (!loadedFace || !node.ownerDocument.fonts.check(fontDescription, node.data))
+      throw new RenderPDFError('MISSING_FONT', `Browser font is not loaded: ${fontDescription}.`);
+    cache.context.font = fontDescription;
+    // Font bounding metrics cover accents consistently across lines, unlike actual ink bounds.
+    const measured = cache.context.measureText(node.data);
+    // The browser's em-box ascent and descent are preferable to guessing from font size.
+    const ascent = measured.fontBoundingBoxAscent;
+    // Range height is rounded by Chromium, so center the metric box within it.
+    const descent = measured.fontBoundingBoxDescent;
+    if (!Number.isFinite(ascent) || !Number.isFinite(descent))
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Font bounding metrics are unavailable in this browser.',
+      );
+    metrics = { ascent, descent };
+    cache.fonts.set(fontDescription, metrics);
+  }
+  const { ascent, descent } = metrics;
+  // Grapheme boundaries preserve surrogate pairs and combining marks in every script.
+  const segments = graphemes.segment(node.data);
   // A reusable Range reads browser-produced geometry, not a synthetic line-breaking algorithm.
-  const range = document.createRange();
+  const range = node.ownerDocument.createRange();
   // Line ranges are collected before their complete text and horizontal extent are measured.
   const lines: { start: number; end: number; top: number }[] = [];
   // Each grapheme's visible rectangle identifies the line selected by browser layout.
@@ -281,10 +311,21 @@ function measureText(
     range.setStart(node, segment.index);
     range.setEnd(node, segment.index + segment.segment.length);
     // Collapsed whitespace produces empty rectangles and should not create phantom runs.
-    const rectangle = Array.from(range.getClientRects()).find(
-      (item) => item.width > 0 && item.height > 0,
-    );
-    if (!rectangle) continue;
+    const rectangles = Array.from(range.getClientRects());
+    const rectangle = rectangles.find((item) => item.width > 0 && item.height > 0);
+    if (!rectangle) {
+      // Chromium can assign a ligature's entire width to an earlier text node.
+      if (
+        /[^\t\n\r\f ]/.test(segment.segment) &&
+        rectangles.some((item) => item.height > 0 && item.width === 0)
+      ) {
+        throw new RenderPDFError(
+          'UNSUPPORTED_CSS',
+          'Text shaping crosses an inline boundary or uses an unsupported zero-width glyph. Keep each shaped word in one text node.',
+        );
+      }
+      continue;
+    }
     // Adjacent visible glyphs with matching tops belong to one browser line.
     const previous = lines.at(-1);
     if (previous && Math.abs(previous.top - rectangle.top) < 0.5) {
@@ -307,19 +348,40 @@ function measureText(
     if (start === end) return [];
     range.setStart(node, start);
     range.setEnd(node, end);
-    // Source offsets remain available for independent per-word Range measurements.
+    // Source offsets remain available for independent per-run Range measurements.
     const sourceLine = node.data.slice(start, end);
     // Collapse only CSS normal-whitespace characters; preserve non-breaking spaces.
     const text = sourceLine.replace(/[\t\n\r\f ]+/g, ' ');
     // Whole-line bounds remain the atomic pagination interval and verification metadata.
     const bounds = relativeBounds(range.getBoundingClientRect(), origin);
-    // Measured word origins prevent endpoint fitting from accumulating drift across a line.
-    const runs = Array.from(sourceLine.matchAll(/[^\t\n\r\f ]+/g), (match) => {
-      range.setStart(node, start + match.index);
-      range.setEnd(node, start + match.index + match[0].length);
-      // Each word preserves its internal shaping; PDF placement still approximates kerning.
-      const wordBounds = relativeBounds(range.getBoundingClientRect(), origin);
-      return { text: match[0], x: wordBounds.x, width: wordBounds.width };
+    // Measured run origins prevent endpoint fitting from accumulating drift across a line.
+    const runs = Array.from(sourceLine.matchAll(/[^\t\n\r\f ]+/g)).flatMap((match) => {
+      const pieces: { text: string; offset: number }[] = [];
+      let begin = 0;
+      let direction: 'ltr' | 'rtl' | undefined;
+      for (const segment of graphemes.segment(match[0])) {
+        const next = rtlGrapheme.test(segment.segment)
+          ? 'rtl'
+          : strongGrapheme.test(segment.segment)
+            ? 'ltr'
+            : undefined;
+        if (direction && next && next !== direction) {
+          pieces.push({
+            text: match[0].slice(begin, segment.index),
+            offset: start + match.index + begin,
+          });
+          begin = segment.index;
+        }
+        if (next) direction = next;
+      }
+      pieces.push({ text: match[0].slice(begin), offset: start + match.index + begin });
+      return pieces.map((piece) => {
+        range.setStart(node, piece.offset);
+        range.setEnd(node, piece.offset + piece.text.length);
+        // The browser already resolved bidi placement for each shaped fragment.
+        const runBounds = relativeBounds(range.getBoundingClientRect(), origin);
+        return { text: piece.text, x: runBounds.x, width: runBounds.width };
+      });
     });
     return [
       {
@@ -332,6 +394,7 @@ function measureText(
         family: face.family,
         weight: face.weight,
         style: face.style,
+        kerning: style.fontKerning !== 'none',
         color: style.color,
         invisible,
       },
@@ -348,13 +411,18 @@ function validateLayoutSource(
   root: HTMLElement,
   fonts: readonly RegisteredFont[],
   fallback: 'auto' | 'strict',
+  repeatTableHeaders = false,
 ): void {
   if (fallback !== 'auto' && fallback !== 'strict') {
     throw new RenderPDFError('INVALID_OPTIONS', 'Raster fallback must be auto or strict.');
   }
+  if (typeof repeatTableHeaders !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'Table header repetition must be a boolean.');
+  }
   if (
-    !(root instanceof HTMLElement) ||
-    root.ownerDocument !== document ||
+    !root ||
+    !isHtmlElement(root) ||
+    !root.ownerDocument.defaultView ||
     !root.isConnected ||
     fonts.length === 0
   )
@@ -375,7 +443,7 @@ function validateLayoutSource(
   // Ancestor effects can alter pixels without changing local descendant computed styles.
   for (let ancestor = composedParent(root); ancestor; ancestor = composedParent(ancestor)) {
     // Exporting a clipped/transformed application viewport requires a richer scene model.
-    const ancestorStyle = getComputedStyle(ancestor);
+    const ancestorStyle = computedStyle(ancestor);
     if (
       ancestorStyle.transform !== 'none' ||
       ancestorStyle.filter !== 'none' ||
@@ -395,6 +463,129 @@ function validateLayoutSource(
   }
 }
 
+/** Collect replayable native headers while keeping the browser's original column geometry.
+ * @param root Entire connected source whose measured operations retain DOM paint order.
+ * @param origin Source rectangle shared by all original paint coordinates.
+ * @param operations Complete original display list; repeated lists keep these exact references.
+ * @param headerPaint Descendant operations recorded during each visible THEAD traversal.
+ * @param elementBoxes Native ancestor backgrounds needed underneath transparent header cells.
+ */
+function measureTableHeaders(
+  root: HTMLElement,
+  origin: DOMRect,
+  operations: PaintOperation[],
+  headerPaint: Map<HTMLTableSectionElement, PaintOperation[]>,
+  elementBoxes: Map<HTMLElement, BoxOperation>,
+  collapsedTables: Map<HTMLTableElement, CollapsedTablePaint>,
+): TableHeader[] {
+  // Root tables participate just like tables nested in an ordinary document wrapper.
+  const tables = Array.from(root.querySelectorAll('table'));
+  if (isHtmlTag(root, 'table')) tables.unshift(root);
+  // One page reserves one full-width header band; concurrent tables cannot share that contract.
+  const headers: TableHeader[] = [];
+  for (const table of tables) {
+    // Tables without a visible original header or body do not need a continuation header.
+    const head = table.tHead;
+    if (!head || computedStyle(head).display === 'none') continue;
+    const collapsed = collapsedTables.get(table);
+    const bounds = collapsed?.headerBounds ?? relativeBounds(head.getBoundingClientRect(), origin);
+    if (bounds.width <= 0 || bounds.height <= 0) continue;
+    const bodyRows = Array.from(table.tBodies).flatMap((body) =>
+      Array.from(body.rows).filter((row) => row.getBoundingClientRect().height > 0),
+    );
+    if (bodyRows.length === 0) continue;
+    if (collapsed && !collapsed.repeatSafe) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Repeated collapsed headers require matching horizontal border winners at the header/body boundary and all body row boundaries.',
+      );
+    }
+    if (
+      table.parentElement?.closest('table') ||
+      table.querySelector('table') ||
+      Array.from(table.children).filter((child) => child.tagName === 'THEAD').length !== 1 ||
+      computedStyle(table).display !== 'table' ||
+      computedStyle(head).display !== 'table-header-group'
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_ELEMENT',
+        'Repeated headers require a standalone native table with one THEAD and no nested tables.',
+      );
+    }
+    // Header rowspans and raster captures do not have an independently replayable native band.
+    if (
+      Array.from(head.rows).some((row) =>
+        Array.from(row.cells).some((cell) => cell.rowSpan !== 1),
+      ) ||
+      operations.some(
+        (operation) =>
+          operation.kind === 'raster' &&
+          (operation.element.contains(head) || head.contains(operation.element)),
+      )
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_ELEMENT',
+        'Repeated table headers do not support header rowspans or rasterized headers and ancestors.',
+      );
+    }
+    // Include the browser's inter-group border spacing in every repeated header's reserved height.
+    const bodyStart = relativeBounds(bodyRows[0]!.getBoundingClientRect(), origin).y;
+    const lastRow = relativeBounds(bodyRows.at(-1)!.getBoundingClientRect(), origin);
+    const bodyEnd = lastRow.y + lastRow.height;
+    const painted = headerPaint.get(head);
+    if (
+      !painted ||
+      bodyStart < bounds.y + bounds.height - 0.1 ||
+      bodyEnd <= bodyStart ||
+      painted.some(
+        (operation) =>
+          operation.kind !== 'border' &&
+          (operation.bounds.y < bounds.y - 0.1 ||
+            // Continuations may reuse the source row gap, so every repeated glyph must fit THEAD itself.
+            operation.bounds.y + operation.bounds.height > bounds.y + bounds.height + 0.1 ||
+            operation.bounds.x < bounds.x - 0.1 ||
+            operation.bounds.x + operation.bounds.width > bounds.x + bounds.width + 0.1),
+      ) ||
+      bodyRows.some((row) =>
+        Array.from(row.cells).some((cell) => {
+          // Existing body-only rowspans stay atomic; crossing a repeated section edge is unsafe.
+          const cellBounds = relativeBounds(cell.getBoundingClientRect(), origin);
+          return cellBounds.y < bodyStart - 0.1 || cellBounds.y + cellBounds.height > bodyEnd + 0.1;
+        }),
+      )
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Repeated table headers require a separate, ordered header band without overflowing paint or cells spanning header/body boundaries.',
+      );
+    }
+    if (
+      headers.some(
+        (header) => Math.min(header.bodyEnd, bodyEnd) - Math.max(header.bounds.y, bounds.y) > 0.01,
+      )
+    ) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Repeated headers do not support tables whose vertical continuation intervals overlap.',
+      );
+    }
+    // Replay ancestor boxes in their original order, clipped by the writer to this header band.
+    const included = new Set<PaintOperation>(painted);
+    for (let ancestor = head.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const box = elementBoxes.get(ancestor);
+      if (box) included.add(box);
+      if (ancestor === root) break;
+    }
+    headers.push({
+      bounds,
+      bodyStart,
+      bodyEnd,
+      operations: operations.filter((operation) => included.has(operation)),
+    });
+  }
+  return headers;
+}
+
 /** Prepare browser resources, then snapshot the supported static DOM subset without changing it.
  * @param root Connected, visible HTMLElement whose existing browser layout is exported.
  * @param fonts Explicit faces used both by the browser and PDF embedding.
@@ -408,15 +599,22 @@ export async function snapshotLayout(
     fallback?: 'auto' | 'strict';
     /** Reject unsupported decorative CSS rather than omitting it. */
     strictCss?: boolean;
+    /** Reserve and replay a native THEAD on each body continuation page. */
+    repeatTableHeaders?: boolean;
   } = {},
 ): Promise<LayoutSnapshot> {
   // Capture the caller's policy before yielding, and reject invalid input before waiting on resources.
   const fallback = options.fallback ?? 'auto';
-  validateLayoutSource(root, fonts, fallback);
-  await document.fonts.ready;
+  const strictCss = options.strictCss ?? false;
+  if (typeof strictCss !== 'boolean') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'strictCss must be a boolean.');
+  }
+  const repeatTableHeaders = options.repeatTableHeaders ?? false;
+  validateLayoutSource(root, fonts, fallback, repeatTableHeaders);
+  await root.ownerDocument.fonts.ready;
   // Image decoding completes before any geometry is measured.
   const images = Array.from(root.querySelectorAll('img'));
-  if (root instanceof HTMLImageElement) images.unshift(root);
+  if (isHtmlTag(root, 'img')) images.unshift(root);
   await Promise.all(
     images.map(async (image) => {
       try {
@@ -428,7 +626,7 @@ export async function snapshotLayout(
       }
     }),
   );
-  return measurePreparedLayout(root, fonts, { fallback, strictCss: options.strictCss ?? false });
+  return measurePreparedLayout(root, fonts, { fallback, repeatTableHeaders, strictCss });
 }
 
 /** Measure settled browser resources synchronously so a source guard can share the same task.
@@ -444,6 +642,8 @@ export function measurePreparedLayout(
     fallback?: 'auto' | 'strict';
     /** Reject unsupported decorative CSS rather than omitting it. */
     strictCss?: boolean;
+    /** Reserve and replay a native THEAD on each body continuation page. */
+    repeatTableHeaders?: boolean;
   } = {},
 ): LayoutSnapshot {
   // Capture the policy once; this path deliberately performs no asynchronous resource preparation.
@@ -452,7 +652,8 @@ export function measurePreparedLayout(
   if (typeof strictCss !== 'boolean') {
     throw new RenderPDFError('INVALID_OPTIONS', 'strictCss must be a boolean.');
   }
-  validateLayoutSource(root, fonts, fallback);
+  const repeatTableHeaders = options.repeatTableHeaders ?? false;
+  validateLayoutSource(root, fonts, fallback, repeatTableHeaders);
   // One origin is shared by vector text, image bounds, and raster regions.
   const origin = root.getBoundingClientRect();
   if (origin.width <= 0 || origin.height <= 0)
@@ -461,21 +662,28 @@ export function measurePreparedLayout(
       'The source root must have positive visible dimensions.',
     );
   // Canvas is never appended, so measurement leaves the application DOM unchanged.
-  const contextCandidate = document.createElement('canvas').getContext('2d');
+  const contextCandidate = root.ownerDocument.createElement('canvas').getContext('2d');
   if (!contextCandidate)
     throw new RenderPDFError('INVALID_SOURCE', 'Canvas font measurement is unavailable.');
   // Capture the checked context as a non-null value for the recursive visitor.
-  const context: CanvasRenderingContext2D = contextCandidate;
+  const cache: TextMetricsCache = { context: contextCandidate, fonts: new Map() };
   // The list's order is the paint order for this deliberately restricted static subset.
   const operations: PaintOperation[] = [];
+  // Record native ownership only when the caller explicitly requests repeated table headers.
+  const headerPaint = new Map<HTMLTableSectionElement, PaintOperation[]>();
+  const elementBoxes = new Map<HTMLElement, BoxOperation>();
+  // A collapsed grid paints one resolved border layer after every cell's background and text.
+  const collapsedTables = new Map<HTMLTableElement, CollapsedTablePaint>();
   // Browser rows and rowspan cells are indivisible intervals for the existing page mapper.
   const atomicBounds: Bounds[] = [];
+  // Outer collapsed half-strokes extend only their first and last row's atomic interval.
+  const tableRows = new Map<HTMLTableRowElement, Bounds>();
   // Approximate baseline and shaping behavior must remain visible to experiment users.
   const warnings: RenderWarning[] = [
     {
       code: 'TEXT_METRICS_APPROXIMATED',
       message:
-        'Baselines are estimated from Canvas font metrics and PDF word advances are fitted to Range widths; glyph shaping and kerning are not guaranteed.',
+        'Baselines are estimated from Canvas font metrics; browser and PDF shaping engines may still differ for some scripts or font features.',
     },
   ];
 
@@ -485,9 +693,12 @@ export function measurePreparedLayout(
    * @param insideAutomatic Whether automatic capture must retain the stricter native safety guards.
    */
   function visit(element: HTMLElement, insideRaster: boolean, insideAutomatic = false): void {
+    // A header's own box and descendants form one contiguous section of the original paint list.
+    const operationStart = operations.length;
     // Display-none descendants have no paint or extraction contribution.
-    const style = getComputedStyle(element);
+    const style = computedStyle(element);
     if (style.display === 'none') return;
+    const collapsed = collapsedTableOwner(element, style);
     if (style.visibility !== 'visible') {
       if (!insideRaster || insideAutomatic)
         throw new RenderPDFError(
@@ -504,11 +715,11 @@ export function measurePreparedLayout(
       (!insideRaster || insideAutomatic) &&
       ![
         'MAIN',
+        'BODY',
         'SECTION',
         'ARTICLE',
         'DIV',
         'SPAN',
-        'SMALL',
         'P',
         'H1',
         'H2',
@@ -517,6 +728,7 @@ export function measurePreparedLayout(
         'H5',
         'H6',
         'STRONG',
+        'SMALL',
         'EM',
         'B',
         'I',
@@ -553,14 +765,13 @@ export function measurePreparedLayout(
     const automatic = insideAutomatic || automaticReason !== undefined;
     if (automatic) {
       if (insideAutomatic) automaticRasterReason(style, strictCss);
-      validateVectorStyle(element, style, true, strictCss);
+      validateVectorStyle(element, style, true, collapsed !== undefined, strictCss);
       validateDisplay(element, style);
     }
     if (
       insideRaster &&
       (style.transform !== 'none' ||
         style.writingMode !== 'horizontal-tb' ||
-        style.direction !== 'ltr' ||
         style.opacity === '0' ||
         style.clipPath !== 'none' ||
         style.maskImage !== 'none' ||
@@ -569,7 +780,7 @@ export function measurePreparedLayout(
     ) {
       warnings.push({
         code: 'RASTER_TEXT_OMITTED',
-        message: `Raster text extraction omitted for transformed, clipped, hidden, masked, or non-LTR subtree ${element.tagName}.`,
+        message: `Raster text extraction omitted for transformed, clipped, hidden, or masked subtree ${element.tagName}.`,
       });
       return;
     }
@@ -589,6 +800,12 @@ export function measurePreparedLayout(
     }
     // One chosen boundary owns all visible descendants exactly once, regardless of nested markers.
     const raster = explicitRaster || automaticReason !== undefined;
+    if (raster && collapsed && !isHtmlTag(element, 'table')) {
+      throw new RenderPDFError(
+        'UNSUPPORTED_CSS',
+        'Collapsed table cells and internal groups cannot be independently rasterized.',
+      );
+    }
     if (raster) {
       if (
         style.position !== 'static' ||
@@ -620,15 +837,17 @@ export function measurePreparedLayout(
         return;
       }
     } else if (!insideRaster) {
-      validateVectorStyle(element, style, false, strictCss);
+      validateVectorStyle(element, style, false, collapsed !== undefined, strictCss);
       validateDisplay(element, style);
       if (
-        element instanceof HTMLTableRowElement ||
-        (element instanceof HTMLTableCellElement && element.rowSpan !== 1)
+        isHtmlTag(element, 'tr') ||
+        ((isHtmlTag(element, 'td') || isHtmlTag(element, 'th')) && element.rowSpan !== 1)
       ) {
-        atomicBounds.push(bounds);
+        const atomic = { ...bounds };
+        atomicBounds.push(atomic);
+        if (isHtmlTag(element, 'tr')) tableRows.set(element, atomic);
       }
-      if (element instanceof HTMLImageElement) {
+      if (isHtmlTag(element, 'img')) {
         if (style.objectFit !== 'fill' || style.borderTopWidth !== '0px')
           throw new RenderPDFError(
             'UNSUPPORTED_CSS',
@@ -652,7 +871,7 @@ export function measurePreparedLayout(
         }
         operations.push({ kind: 'image', bounds, element });
       } else if (!['BR', 'COL', 'COLGROUP'].includes(element.tagName)) {
-        operations.push({
+        const box: BoxOperation = {
           kind: 'box',
           bounds,
           // Table-row backgrounds are not represented by the native cell paint order.
@@ -662,8 +881,10 @@ export function measurePreparedLayout(
               ? 'rgba(0, 0, 0, 0)'
               : style.backgroundColor,
           borderColor: style.borderTopColor,
-          borderWidth: Number.parseFloat(style.borderTopWidth),
-        });
+          borderWidth: collapsed ? 0 : Number.parseFloat(style.borderTopWidth),
+        };
+        operations.push(box);
+        if (repeatTableHeaders) elementBoxes.set(element, box);
       }
     }
     // Raster descendants retain semantic text without emitting duplicate visible boxes or images.
@@ -673,9 +894,10 @@ export function measurePreparedLayout(
       const siblingBounds = Array.from(element.children)
         .filter(
           (child): child is HTMLElement =>
-            child instanceof HTMLElement &&
-            getComputedStyle(child).display !== 'none' &&
-            getComputedStyle(child).visibility !== 'hidden',
+            isHtmlElement(child) &&
+            !(collapsed && ['COL', 'COLGROUP'].includes(child.tagName)) &&
+            computedStyle(child).display !== 'none' &&
+            computedStyle(child).visibility !== 'hidden',
         )
         .map((child) => child.getBoundingClientRect());
       for (let firstIndex = 0; firstIndex < siblingBounds.length; firstIndex += 1) {
@@ -703,20 +925,60 @@ export function measurePreparedLayout(
     }
     // Child nodes, including inline text, retain source order within the restricted paint model.
     for (const child of element.childNodes) {
-      if (child instanceof Text)
-        operations.push(...measureText(child, origin, fonts, context, invisible));
-      else if (child instanceof HTMLElement) visit(child, invisible, automatic);
-      else if (child instanceof Element) {
+      if (child.nodeType === 3)
+        operations.push(...measureText(child as Text, origin, fonts, cache, invisible));
+      else if (isHtmlElement(child)) visit(child, invisible, automatic);
+      else if (child.nodeType === 1) {
+        const foreign = child as Element;
         if (invisible)
           warnings.push({
             code: 'RASTER_TEXT_OMITTED',
-            message: `Raster text extraction omitted for ${child.tagName}.`,
+            message: `Raster text extraction omitted for ${foreign.tagName}.`,
           });
         else
           throw new RenderPDFError(
             'UNSUPPORTED_ELEMENT',
-            `Cannot snapshot ${child.tagName}; use a raster subtree.`,
+            `Cannot snapshot ${foreign.tagName}; use a raster subtree.`,
           );
+      }
+    }
+    if (
+      repeatTableHeaders &&
+      ['THEAD', 'TBODY', 'TFOOT'].includes(element.tagName) &&
+      element.tagName === 'THEAD'
+    ) {
+      headerPaint.set(element as HTMLTableSectionElement, operations.slice(operationStart));
+    }
+    if (!invisible && isHtmlTag(element, 'table') && collapsed) {
+      const paint = measureCollapsedTableBorders(element, origin);
+      collapsedTables.set(element, paint);
+      // Avoid the JavaScript argument-count limit when a long table creates many border segments.
+      for (const operation of paint.operations) operations.push(operation);
+      // Include the table's outer half-borders in the neighboring row, avoiding border-only pages.
+      const rows = Array.from(element.rows).filter((row) => tableRows.has(row));
+      const firstRow = rows[0] ? tableRows.get(rows[0]) : undefined;
+      const lastRow = rows.at(-1) ? tableRows.get(rows.at(-1)!) : undefined;
+      const extent = paint.operations.reduce(
+        (bounds, { bounds: border }) => ({
+          top: Math.min(bounds.top, border.y),
+          bottom: Math.max(bounds.bottom, border.y + border.height),
+        }),
+        { top: firstRow?.y ?? 0, bottom: lastRow ? lastRow.y + lastRow.height : 0 },
+      );
+      if (firstRow && extent.top < firstRow.y) {
+        firstRow.height += firstRow.y - extent.top;
+        firstRow.y = extent.top;
+      }
+      if (lastRow) lastRow.height = Math.max(lastRow.height, extent.bottom - lastRow.y);
+      const head = element.tHead;
+      if (repeatTableHeaders && head && paint.headerBounds) {
+        const bounds = paint.headerBounds;
+        const included = paint.operations.filter(
+          (border) =>
+            border.bounds.y < bounds.y + bounds.height + 0.001 &&
+            border.bounds.y + border.bounds.height > bounds.y - 0.001,
+        );
+        headerPaint.set(head, [...(headerPaint.get(head) ?? []), ...included]);
       }
     }
   }
@@ -774,5 +1036,23 @@ export function measurePreparedLayout(
       'Visible source text or paint overflows the root border box.',
     );
   }
-  return { width: origin.width, height: origin.height, operations, warnings, atomicBounds };
+  return {
+    width: origin.width,
+    height: origin.height,
+    operations,
+    warnings,
+    atomicBounds,
+    ...(repeatTableHeaders
+      ? {
+          tableHeaders: measureTableHeaders(
+            root,
+            origin,
+            operations,
+            headerPaint,
+            elementBoxes,
+            collapsedTables,
+          ),
+        }
+      : {}),
+  };
 }

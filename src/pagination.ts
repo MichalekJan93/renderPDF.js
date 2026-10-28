@@ -1,6 +1,6 @@
 import { RenderPDFError } from './diagnostics.js';
 import type { RenderWarning } from './diagnostics.js';
-import type { Bounds, LayoutSnapshot } from './types.js';
+import type { Bounds, LayoutSnapshot, TableHeader } from './types.js';
 
 /** Browser-measured coordinates may differ by less than one hundredth of a CSS pixel. */
 const BREAK_EPSILON = 0.01;
@@ -11,6 +11,10 @@ export interface PageSlice {
   start: number;
   /** Exclusive source bottom in CSS pixels. */
   end: number;
+  /** Original header replayed before this continuation interval; absent on its first page. */
+  header?: TableHeader;
+  /** Reserved repeated band, counting any leading source row gap only once. */
+  headerHeight?: number;
 }
 
 /** Reject invalid or out-of-source intervals before trying to partition coordinates. */
@@ -98,10 +102,75 @@ export function paginate(
   // Text/images and measured table intervals must retain the same indivisible page ownership.
   const atomic = [
     ...snapshot.operations
-      .filter((operation) => operation.kind !== 'box')
+      .filter((operation) => operation.kind !== 'box' && operation.kind !== 'border')
       .map((operation) => operation.bounds),
     ...(snapshot.atomicBounds ?? []),
   ];
+  // A native table's first header and first complete body-row cluster must start together.
+  const headers = snapshot.tableHeaders ?? [];
+  for (const [index, header] of headers.entries()) {
+    assertInterval(header.bounds, snapshot.height, 'Table header');
+    if (
+      header.bounds.width <= 0 ||
+      header.bounds.height <= 0 ||
+      !Number.isFinite(header.bodyStart) ||
+      !Number.isFinite(header.bodyEnd) ||
+      header.bodyStart < header.bounds.y + header.bounds.height - BREAK_EPSILON ||
+      header.bodyEnd <= header.bodyStart ||
+      header.bodyEnd > snapshot.height + BREAK_EPSILON
+    ) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'Repeated table headers require a positive header followed by finite body row bounds.',
+      );
+    }
+    if (
+      headers
+        .slice(0, index)
+        .some(
+          (previous) =>
+            Math.min(previous.bodyEnd, header.bodyEnd) -
+              Math.max(previous.bounds.y, header.bounds.y) >
+            BREAK_EPSILON,
+        )
+    ) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'Repeated table header continuation intervals must not overlap.',
+      );
+    }
+    // Positive overlap joins body-only rowspans to all rows they protect, never merely touching rows.
+    let firstRowEnd = header.bodyStart;
+    for (;;) {
+      const next = atomic.reduce(
+        (end, bounds) =>
+          bounds.y >= header.bodyStart - BREAK_EPSILON &&
+          bounds.y < header.bodyEnd - BREAK_EPSILON &&
+          (bounds.y <= header.bodyStart + BREAK_EPSILON || bounds.y < firstRowEnd - BREAK_EPSILON)
+            ? Math.max(end, bounds.y + bounds.height)
+            : end,
+        firstRowEnd,
+      );
+      if (next === firstRowEnd) break;
+      firstRowEnd = next;
+    }
+    if (firstRowEnd <= header.bodyStart + BREAK_EPSILON) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'Repeated table headers require a measured atomic first body row.',
+      );
+    }
+    if (firstRowEnd - header.bounds.y > contentHeight + BREAK_EPSILON) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'A table header and its first atomic body row cannot fit on one page.',
+      );
+    }
+    atomic.push({
+      ...header.bounds,
+      height: firstRowEnd - header.bounds.y,
+    });
+  }
   for (const bounds of atomic) {
     assertInterval(bounds, snapshot.height, 'Atomic');
     if (bounds.height > contentHeight + BREAK_EPSILON) {
@@ -185,6 +254,34 @@ export function paginate(
   // Each required break is consumed once; natural pages may precede it.
   let forcedIndex = 0;
   while (start < snapshot.height) {
+    // A header is repeated only while the new page begins inside its body, excluding TFOOT.
+    const header = headers.find(
+      (candidate) =>
+        start >= candidate.bodyStart - BREAK_EPSILON && start < candidate.bodyEnd - BREAK_EPSILON,
+    );
+    // Source slices can begin in border spacing already reserved below the previous page's row.
+    const nextRowStart = header
+      ? (snapshot.atomicBounds ?? []).reduce(
+          (nearest, bounds) =>
+            bounds.y >= start - BREAK_EPSILON && bounds.y < header.bodyEnd - BREAK_EPSILON
+              ? Math.min(nearest, bounds.y)
+              : nearest,
+          Number.POSITIVE_INFINITY,
+        )
+      : start;
+    const leadingGap = Number.isFinite(nextRowStart) ? Math.max(0, nextRowStart - start) : 0;
+    // Keep the entire header, but subtract any inter-row gap that the body slice already contains.
+    const headerHeight = header
+      ? Math.max(header.bounds.height, header.bodyStart - header.bounds.y - leadingGap)
+      : 0;
+    // Every repeated band consumes real page height without consuming original source coordinates.
+    const capacity = contentHeight - headerHeight;
+    if (capacity <= BREAK_EPSILON) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'A repeated table header leaves no space for its body rows.',
+      );
+    }
     // Ignore already consumed required cuts without producing zero-length pages.
     while (
       forcedBreaks[forcedIndex] !== undefined &&
@@ -194,7 +291,18 @@ export function paginate(
     // A required boundary ends the page only when it lies within the usable height.
     const forced = forcedBreaks[forcedIndex] ?? snapshot.height;
     // Atomic content is always respected, independently of optional avoidance preferences.
-    const target = Math.min(start + contentHeight, forced, snapshot.height);
+    const target = Math.min(start + capacity, forced, snapshot.height);
+    if (
+      header &&
+      atomic.some(
+        (bounds) => bounds.y <= start + BREAK_EPSILON && crosses(bounds, start + capacity),
+      )
+    ) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'A repeated table header and its atomic body row cannot fit on one page.',
+      );
+    }
     // Forced cuts were globally checked against every intrinsic atomic interval above.
     const requiredEnd = atomicCut(target, start, atomic);
     // Moving preferences must never erase or pull back an explicit reachable CSS break.
@@ -217,7 +325,29 @@ export function paginate(
         end = next;
       }
     }
-    slices.push({ start, end });
+    // An unreachable atomic cluster must fail rather than make an empty page or loop forever.
+    if (end <= start + BREAK_EPSILON) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'Page planning must advance through the source.',
+      );
+    }
+    if (
+      header &&
+      !(snapshot.atomicBounds ?? []).some(
+        (bounds) =>
+          bounds.y >= start - BREAK_EPSILON &&
+          bounds.y < header.bodyEnd - BREAK_EPSILON &&
+          bounds.y + bounds.height <= end + BREAK_EPSILON &&
+          bounds.y + bounds.height > start + BREAK_EPSILON,
+      )
+    ) {
+      throw new RenderPDFError(
+        'PAGINATION_FAILED',
+        'A repeated table header must share its page with a complete atomic body row.',
+      );
+    }
+    slices.push({ start, end, ...(header ? { header, headerHeight } : {}) });
     start = end;
   }
   return slices;

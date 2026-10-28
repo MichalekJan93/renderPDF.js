@@ -10,6 +10,8 @@ function requiredFiles(): PackedFile[] {
   const paths = [
     'package.json',
     'README.md',
+    'API.md',
+    'CHANGELOG.md',
     'LICENSE',
     'assets/renderpdf-logo.png',
     'dist/index.js',
@@ -41,14 +43,17 @@ describe('npm package contents', () => {
     expect(validatePackageManifest([{ files }])).not.toEqual([]);
   });
 
-  it.each(['dist/index.js', 'dist/index.d.ts', 'LICENSE', 'assets/renderpdf-logo.png'])(
-    'rejects a package missing its required file: %s',
-    (path) => {
-      // Removing a required path simulates an incomplete build or overbroad exclusion.
-      const files = requiredFiles().filter((file) => file.path !== path);
-      expect(validatePackageManifest([{ files }])).not.toEqual([]);
-    },
-  );
+  it.each([
+    'dist/index.js',
+    'dist/index.d.ts',
+    'CHANGELOG.md',
+    'LICENSE',
+    'assets/renderpdf-logo.png',
+  ])('rejects a package missing its required file: %s', (path) => {
+    // Removing a required path simulates an incomplete build or overbroad exclusion.
+    const files = requiredFiles().filter((file) => file.path !== path);
+    expect(validatePackageManifest([{ files }])).not.toEqual([]);
+  });
 
   it('rejects duplicate entries even when every required path is present', () => {
     // A duplicate manifest entry must not conceal an ambiguous package inventory.

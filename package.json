@@ -1,9 +1,32 @@
 {
   "name": "renderpdf-js",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Browser-only HTML to PDF renderer with explicit fonts and local raster regions",
+  "version": "0.5.1",
+  "description": "Create PDFs from HTML, images or code, and merge or split existing PDFs.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichalekJan93/renderPDF.js.git"
+  },
+  "homepage": "https://github.com/MichalekJan93/renderPDF.js#readme",
+  "bugs": {
+    "url": "https://github.com/MichalekJan93/renderPDF.js/issues"
+  },
+  "keywords": [
+    "pdf",
+    "html",
+    "browser",
+    "typescript",
+    "html-to-pdf",
+    "image-to-pdf",
+    "tiff-to-pdf",
+    "pdf-generation",
+    "pdf-merge",
+    "pdf-split"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -17,6 +40,8 @@
     "dist/index.js",
     "dist/*.d.ts",
     "README.md",
+    "CHANGELOG.md",
+    "API.md",
     "LICENSE",
     "assets/renderpdf-logo.png"
   ],
@@ -32,6 +57,8 @@
     "typecheck": "vp check --no-fmt --no-lint",
     "test": "vp test",
     "test:browser": "playwright test",
+    "test:devextreme": "playwright test --config playwright.devextreme.config.ts",
+    "benchmark": "npm run build:library && playwright test --config playwright.benchmark.config.ts",
     "lint": "vp lint",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
@@ -40,7 +67,8 @@
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
     "html-to-image": "^1.11.13",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "utif2": "4.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

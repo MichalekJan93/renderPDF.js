@@ -1,274 +1,574 @@
 <p align="center">
-  <img src="assets/renderpdf-logo.png" alt="RenderPDF.js logo" width="560" />
+  <img src="https://raw.githubusercontent.com/MichalekJan93/renderPDF.js/main/assets/renderpdf-logo.png" alt="RenderPDF.js logo" width="560" />
 </p>
 
 # RenderPDF.js
 
-An open-source TypeScript library for converting HTML/CSS to PDF in the browser,
-with selectable text, local raster fallbacks and automatic pagination. The browser
-calculates layout; RenderPDF.js uses its measured text, box, image and table
-coordinates to write the PDF. Conversion runs entirely on the client.
+**Create PDFs from HTML, images or code, and merge or split existing PDFs.**
 
-The renderer is experimental and supports the bounded subset described below.
-Chromium is the verified browser; Firefox/Safari compatibility has not been
-established.
+[![npm version](https://img.shields.io/npm/v/renderpdf-js)](https://www.npmjs.com/package/renderpdf-js)
+[![CI](https://github.com/MichalekJan93/renderPDF.js/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/MichalekJan93/renderPDF.js/actions/workflows/check.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/MichalekJan93/renderPDF.js/blob/main/LICENSE)
+
+RenderPDF.js is a JavaScript and TypeScript library for creating PDF documents,
+converting HTML and images, and working with existing PDF pages. It runs locally,
+without a conversion server.
+
+HTML exports use the browser's layout, keep text selectable and split content
+across pages. Document creation and PDF composition also work in Node.js,
+without a DOM.
+
+**Experimental.** HTML rendering is tested in Google Chrome; a basic export also
+passed in Microsoft Edge. Firefox and Safari have not been verified. Supported
+HTML and CSS are [described below](#supported-scope).
+
+## Features
+
+- Create documents with text, images, vector graphics, links and form fields.
+- Merge PDFs, extract selected pages and split documents without rasterizing them.
+- Export supported HTML/CSS with selectable text and automatic pagination.
+- Convert PNG/JPEG and multipage TIFF files to PDF.
+- Add repeated table headers, page text, page numbers and document properties.
+- Use the DevExtreme PDF exporter through an optional compatibility adapter.
+- ESM package with TypeScript declarations, cancellation and conversion progress.
+
+See the [API guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md)
+for methods, coordinate conventions and compatibility limits.
+The [changelog](https://github.com/MichalekJan93/renderPDF.js/blob/main/CHANGELOG.md)
+records what changed in each published version, where and why.
 
 ## Getting started
 
-Development requires Node.js 22.18+ on the 22.x release line, 24.11+ on 24.x, or
-26+. The `.node-version` file records the verified 22.22.0 runtime. From a local checkout:
-
 ```sh
-npm ci
-npm run build
+npm install renderpdf-js
 ```
 
-The build creates an ESM entry at `dist/index.js` and TypeScript declarations.
-Use a bundler to resolve the library's three runtime dependencies.
+For browser applications, use an ESM bundler such as Vite.
+The [playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playground)
+provides HTML upload/editing, a preview and timed RenderPDF.js/jsPDF exports
+with output-size and page-count comparisons from a source checkout.
 
-The npm package is currently unpublished and marked `private` to prevent accidental
-publishing. The examples below use the local build.
-
-## Usage
-
-Use this import in an application entry beside the generated `dist/` directory.
+## Create a document
 
 ```ts
-import { registerFont, renderPDF, RenderPDFError } from './dist/index.js';
+import { createDocument } from 'renderpdf-js';
 
-// Fetch a licensed static TTF/OTF program owned by the application.
+const document = await createDocument({ unit: 'mm', format: 'A4' });
+const page = document.addPage();
+page.drawText('Invoice', { x: 20, y: 25, fontSize: 18 });
+page.drawRectangle({ x: 20, y: 35, width: 170, height: 20, stroke: '#333333' });
+
+const pdf = await document.toResult();
+await pdf.download('invoice.pdf');
+```
+
+Coordinates start at the top-left; text `y` is its baseline. Font sizes always use
+points. The document API works without a DOM. Built-in Helvetica, Times and Courier
+cover basic text; provide TTF/OTF bytes in `fonts` for characters outside their
+limited sets. Fonts accept bytes, bare base64 or a font data URL. A variable TTF is
+accepted only at its upright default axes and declared default weight. Fonts are
+prepared before drawing. After `toResult()`, the document is
+immutable.
+
+Use `pdf.toUint8Array()` or `pdf.toBlob()` outside the browser; `download()` is a
+browser action.
+
+## Combine and split PDFs
+
+```ts
+import { mergePDFs, extractPDFPages, splitPDF } from 'renderpdf-js';
+
+const combined = await mergePDFs([firstFile, secondFile], { flattenForms: true });
+await combined.download('combined.pdf');
+
+const selected = await extractPDFPages(firstFile, [3, 1]);
+const individualPages = await splitPDF(firstFile);
+```
+
+Inputs can be `File`/`Blob`, `ArrayBuffer`, `Uint8Array` or a completed export result.
+Page numbers are one-based. Pages retain their native text, vectors, sizes and
+rotation. `flattenForms: true` turns ordinary prepared AcroForm appearances into
+page paint before composition; the default still rejects interactive fields. XFA,
+signed, encrypted PDFs and unsupported destinations fail explicitly. Flattening
+removes interactivity. Document-level bookmarks, signatures and
+metadata are not merged. See the [composition limits](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md#pdf-composition).
+
+## DevExtreme integration
+
+`createJsPDFAdapter()` provides the synchronous drawing and text measurement
+contract used by the DevExtreme PDF exporter. Supply fonts when creating it, pass
+the result as `jsPDFDocument`, then **await** `save()` or `output('blob')`.
+The adapter covers the tested exporter contract; it does not emulate every jsPDF
+plugin or its synchronous serialization. The [API guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md#devextreme-adapter)
+includes an example and the optional integration test command. DevExtreme is not
+a dependency of this library.
+
+## HTML usage
+
+Register a font, select an existing element and export it:
+
+```ts
+import { registerFont, renderPDF } from 'renderpdf-js';
+
+// Supply a licensed static TTF/OTF file from your application.
 const response = await fetch('/fonts/MyFont-Regular.ttf');
 if (!response.ok) throw new Error('The document font could not be loaded.');
-// Register before displaying/measuring the source; use a family owned by this registration.
+
 const regular = await registerFont({
   family: 'Document Sans',
   data: await response.arrayBuffer(),
 });
-// The source stays connected and keeps its existing browser-calculated dimensions.
+
 const source = document.querySelector<HTMLElement>('#invoice');
 if (!source) throw new Error('Invoice element was not found.');
 source.style.fontFamily = 'Document Sans';
 
-try {
-  // At the default A4 margins the source must fit within approximately 745.7 CSS pixels.
-  const pdf = await renderPDF(source, {
-    fonts: [regular],
-    format: 'A4',
-    orientation: 'portrait',
-    margin: 24,
-    rasterScale: 2,
-    fallback: 'auto',
-    strictCss: false,
-    pageBreak: 'css',
-    onWarning: (warning) => console.info(warning.code, warning.message),
-  });
-  await pdf.download('invoice.pdf');
-  // Independent byte and Blob forms do not render the source again.
-  const bytes = await pdf.toUint8Array();
-  // Applications can preview, store or upload this Blob themselves if required.
-  const blob = await pdf.toBlob();
-  console.info(pdf.pageCount, bytes.byteLength, blob.type);
-} catch (error) {
-  if (error instanceof RenderPDFError) console.error(error.code, error.message);
-  else throw error;
-}
+const pdf = await renderPDF(source, {
+  fonts: [regular],
+  format: 'A4',
+  margin: 24,
+});
+
+await pdf.download('invoice.pdf');
 ```
 
-Register each used family, weight and style explicitly, including bold headings.
-`registerFont({ family, data, weight: 700, style: 'normal' })` registers a bold
-program; italic uses `style: 'italic'`. The first computed CSS family must match a
-provided handle. System fonts cannot be recovered through browser layout APIs.
-Registration copies bytes, rejects conflicting browser faces and reuses identical
-registrations. Importing the module is safe without a DOM; conversion and font
-registration require a browser document.
-Variable fonts, WOFF/WOFF2 and font collections are rejected; supply static
-TTF/OTF instances. Do not remove or replace registered browser faces during use.
+Register every font family and style used by the source, including italic faces.
+Available static weights follow CSS nearest-face matching: a requested weight of
+`600` can select a registered `700` face. The first computed CSS font family must
+still match a registered family. TTF/OTF data can be bytes, bare base64 or a font
+data URL. Variable TTF files are supported only at their upright default axes and
+declared default weight; other axis values, system fonts, WOFF/WOFF2 and font
+collections remain unsupported. Disable optical sizing for a variable font with
+an `opsz` axis so browser and PDF outlines use the same instance.
+The selected face must contain every character in its text run; there is no
+automatic per-glyph fallback. A missing character fails with `MISSING_GLYPH`.
+
+Keep the source connected and unchanged during export. `registerFont({ ..., document:
+source.ownerDocument })` registers a face in an iframe's own `FontFaceSet`; the same
+handles belong in that source's `renderPDF` options. The default preserves source
+width and fails when it exceeds the page's content width (about **745.7 CSS
+pixels** for A4 with default margins). `fit: 'width'` instead keeps the browser's
+original wrapping and uniformly reduces PDF paint and page mapping.
+
+### Convert an HTML string
+
+```ts
+import { renderHTML } from 'renderpdf-js';
+
+const pdf = await renderHTML(fullHtmlDocument, {
+  fonts: [{ family: 'Document Sans', data: fontBytes }],
+  sourceWidth: 1200,
+  fit: 'width',
+  orientation: 'auto',
+  fontFallback: 'Document Sans',
+  header: { height: 36, html: '<div style="font-family:Document Sans">Account statement</div>' },
+  footer: { height: 28, left: 'Printed by: Example', right: 'Page {pageNumber}/{pageCount}' },
+});
+```
+
+The default `isolation: 'iframe'` accepts a full HTML document. Use
+`isolation: 'shadow'` for a fragment. Both run in a temporary sandboxed iframe;
+their DOM and font faces are released after export. `sourceWidth` is the browser
+layout width before PDF fitting. `fontFallback` explicitly lays out copied
+elements whose first computed family is unregistered and reports
+`FONT_SUBSTITUTED`; it changes their appearance, so it cannot preserve an
+unprovided system font such as Tahoma. HTML header/footer fragments live in
+separate shadow roots: include their CSS inline or in each fragment. Scripts,
+frames, templates, customized built-ins, active attributes and refresh metadata
+are rejected. Ordinary image and CSS URLs may still trigger browser requests.
+
+## Standalone image files
+
+`imageToPDF` accepts a `File`, `Blob`, `ArrayBuffer` or `Uint8Array`. It detects
+the format from the file contents and requires no HTML element or fonts.
+
+```ts
+import { imageToPDF } from 'renderpdf-js';
+
+const fileInput = document.querySelector<HTMLInputElement>('#image');
+const file = fileInput?.files?.[0];
+if (!file) throw new Error('Select a PNG, JPEG or TIFF file.');
+
+const pdf = await imageToPDF(file, { format: 'A4', margin: 24 });
+await pdf.download('document.pdf');
+```
+
+PNG and JPEG produce one page. Each main TIFF frame produces a page in file order.
+Images are centered and scaled to fit within the margins, preserving their aspect
+ratio; small images can be enlarged. TIFF/EXIF orientations, including mirrored
+orientations and PNG `eXIf`, are applied. JPEG compressed bytes are preserved.
+Image text remains a bitmap; there is no OCR.
+
+See [image format limits](#image-format-limits) for supported TIFF profiles.
+TIFF support applies to this API; HTML `<img>` elements accept PNG/JPEG.
 
 ## API parameters
 
+The tables list public conversion and document settings, accepted values and
+defaults. HTML and standalone-image dimensions use **CSS pixels**:
+`1 px = 0.75 PDF pt`. Custom paper dimensions include margins. Document drawing
+uses its selected `unit`; font sizes in that API always use points.
+Required values have no implicit substitute.
+
 ### `renderPDF(element, options)`
 
-The first row describes the source argument; the remaining rows are fields of
-the second `options` argument. Dimensions and margins use CSS pixels,
-with `1 CSS px = 0.75 PDF pt`. Required values have no implicit substitute.
+| Name                 | Info                                                                                            | Allowed settings                                                                                                      | Default setting                               |
+| -------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `element`            | Existing browser layout. Keep it connected and stable until completion.                         | Positive-size `HTMLElement`, including one in an accessible same-origin iframe.                                       | Required.                                     |
+| `fonts`              | Exact faces used by source text and page bands.                                                 | Nonempty array of `registerFont()` handles belonging to the source document.                                          | Required; no system-font discovery.           |
+| `format`             | Paper size including margins.                                                                   | `'A4'`, `'A3'`, `'Letter'`, or `{ width, height }` with finite positive CSS-pixel dimensions.                         | `'A4'`.                                       |
+| `orientation`        | Selects paper axes without reflowing the source.                                                | `'portrait'`, `'landscape'`, or `'auto'` based on measured source width.                                              | `'portrait'`.                                 |
+| `margin`             | Empty edges; must leave a positive content area.                                                | Finite nonnegative number, or `{ top, right, bottom, left }` in CSS pixels.                                           | `24` on each edge.                            |
+| `fit`                | Uniformly shrinks wide content and page mapping, retaining browser wrapping.                    | `'none'` or `'width'`.                                                                                                | `'none'`; excess width rejects.               |
+| `pageBreak`          | Controls supported authored CSS fragmentation hints.                                            | `'css'` or `'auto'` for geometry alone.                                                                               | `'css'`.                                      |
+| `repeatTableHeaders` | Repeats supported native `thead` on continuation pages.                                         | `true` or `false`.                                                                                                    | `false`.                                      |
+| `header`             | Reserves an additional repeated band above body content.                                        | Text line, text slots or connected HTML; see band fields below.                                                       | Omitted.                                      |
+| `footer`             | Reserves an additional repeated band below body content.                                        | Same forms as `header`.                                                                                               | Omitted.                                      |
+| `fallback`           | Controls automatic selection of safe local raster regions.                                      | `'auto'` or `'strict'`; strict requires explicit `data-raster` for effects needing capture.                           | `'auto'`.                                     |
+| `strictCss`          | Rejects selected unsupported decoration instead of omitting it; independent of raster planning. | `true` or `false`. Default omission covers outer shadows and unsupported table-part backgrounds.                      | `false`.                                      |
+| `rasterScale`        | Raster pixels per CSS pixel in local regions.                                                   | Finite positive number, also bounded by each capture's dimensions and pixel budget.                                   | `2`.                                          |
+| `verifySource`       | Checks that source styles and geometry stay stable.                                             | `'full'` or `'mutations'`; mutations skips CSSOM/computed-style fingerprints and emits `SOURCE_VERIFICATION_REDUCED`. | `'full'`.                                     |
+| `metadata`           | Copies PDF document properties before asynchronous work.                                        | Metadata object below.                                                                                                | Title `'RenderPDF.js'`; other fields omitted. |
+| `signal`             | Cooperative cancellation between export stages.                                                 | `AbortSignal`.                                                                                                        | Omitted.                                      |
+| `onWarning`          | Observes diagnostic records also retained in the result.                                        | Synchronous `(warning: RenderWarning) => void`.                                                                       | Omitted; no console logging.                  |
+| `onProgress`         | Reports stage-local work counts, not elapsed-time percentages.                                  | Synchronous `({ stage, completed, total }) => void`.                                                                  | Omitted.                                      |
 
-| Name          | Info                                                                                                                                                                                                                                                                                                                     | Allowed settings                                                                                                               | Default setting                            |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| `element`     | Existing browser layout to export. Keep it connected and stable until the promise settles; the renderer does not resize or reflow it.                                                                                                                                                                                    | A positive-size `HTMLElement` in the current browser document with supported static content.                                   | Required.                                  |
-| `fonts`       | Exact faces for browser text, PDF embedding and local raster text. Register every used family, weight and style.                                                                                                                                                                                                         | A nonempty array of handles returned by `registerFont()` in the current document, with unique family/weight/style descriptors. | Required; no system-font discovery.        |
-| `format`      | Physical paper size, including margins. Custom dimensions are CSS pixels.                                                                                                                                                                                                                                                | `'A4'`, `'A3'`, `'Letter'`, or `{ width, height }` with finite positive dimensions.                                            | `'A4'`.                                    |
-| `orientation` | Selects the paper axes. Landscape swaps the base width/height, including custom sizes; source width and line wrapping remain unchanged.                                                                                                                                                                                  | `'portrait'` or `'landscape'`.                                                                                                 | `'portrait'`.                              |
-| `margin`      | Empty space at page edges, in CSS pixels. The margins must leave a positive content area.                                                                                                                                                                                                                                | A finite nonnegative number for all edges, or a complete `{ top, right, bottom, left }` object with finite nonnegative values. | `24` on every edge.                        |
-| `rasterScale` | Physical bitmap pixels per CSS pixel inside local raster regions. Higher values can improve detail and increase memory, PDF size and conversion time.                                                                                                                                                                    | A finite number greater than `0`, subject to the per-capture canvas budget below.                                              | `2`.                                       |
-| `fallback`    | Controls automatic selection of local raster regions. `'auto'` selects safe effects; `'strict'` uses only elements explicitly marked `data-raster`.                                                                                                                                                                      | `'auto'` or `'strict'`.                                                                                                        | `'auto'`.                                  |
-| `strictCss`   | Controls the documented decorative omissions: outer box shadows and native table row/group/column backgrounds can disappear; collapsed borders use measured cell boxes without the collapsed-border paint algorithm. `true` rejects those cases. Other unsupported CSS and unsafe content can still fail in either mode. | `false` or `true`.                                                                                                             | `false`, allowing these omissions.         |
-| `pageBreak`   | `'css'` honors supported forced page breaks and keep-together preferences. `'auto'` ignores authored fragmentation hints and fills pages from measured geometry. Neither mode cuts an atomic text line, image, raster region, table row or rowspan cell.                                                                 | `'css'` or `'auto'`.                                                                                                           | `'css'`.                                   |
-| `signal`      | Cooperatively cancels preparation and later rendering stages. Cancellation rejects with `AbortError` and returns no partial PDF.                                                                                                                                                                                         | An `AbortSignal`, usually `controller.signal` from an `AbortController`.                                                       | Not set; no caller-requested cancellation. |
-| `onWarning`   | Receives approximation, raster-fallback and pagination warnings. Warnings are also retained in `result.warnings`.                                                                                                                                                                                                        | A synchronous `(warning: RenderWarning) => void` callback.                                                                     | Not set; no automatic console logging.     |
+`strictCss: false` does not promise support for arbitrary CSS. Supported table
+borders still render natively. Unsafe layout, missing fonts/glyphs and invalid
+resources still reject. Set `strictCss: true` when omitted decoration must fail.
+Use `fallback` separately to control local raster planning.
 
-`fallback: 'strict'` and `strictCss: true` are independent controls. The first
-requires explicit markers for raster capture; the second rejects the listed
-decorative omissions. With `fallback: 'strict'` and `strictCss: false`, an
-unmarked box shadow is omitted even when it is inset. Use `data-raster` to retain
-supported inset shadows in that mode. Neither option enables general CSS support.
-An outer shadow on a selected raster root may be omitted, while unsafe effects
-inside its descendants can still fail.
+### `renderHTML(html, options)`
 
-Use `pageBreak: 'auto'` to fill available page space when the HTML contains
-`break-before: page` or `page-break-before: always` that you want to ignore.
-This also ignores `break-inside: avoid` and other authored keep-together hints;
-table rows and the other intrinsic atomic items remain undivided.
+Accepts the `renderPDF` settings above, with these differences and additions.
+The temporary isolated document and its font faces are released after export.
 
-Each local raster capture is limited to `8192` physical pixels per axis and
-`16,777,216` total physical pixels. Increasing `rasterScale` can exceed those
-limits even when the HTML element fits on a PDF page.
+| Name               | Info                                                                                        | Allowed settings                                                             | Default setting                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `html`             | HTML to parse and lay out. Active markup rejects.                                           | Nonempty HTML string; full document in iframe mode, fragment in shadow mode. | Required.                                                                            |
+| `fonts`            | Programs registered inside the temporary document.                                          | Nonempty array of font sources below, without `document`.                    | Required.                                                                            |
+| `isolation`        | Document parsing or shadow-root fragment; both use a sandboxed iframe.                      | `'iframe'` or `'shadow'`.                                                    | `'iframe'`.                                                                          |
+| `sourceWidth`      | Browser layout width before PDF fitting.                                                    | Finite positive CSS-pixel number, at most `32768`.                           | Printable width rounded down; `'auto'` orientation uses portrait for initial layout. |
+| `fontFallback`     | Relayouts copied elements whose first CSS family is unregistered; emits `FONT_SUBSTITUTED`. | A family supplied in `fonts`.                                                | Omitted; no substitution.                                                            |
+| `header`, `footer` | Repeated bands in the isolated document.                                                    | Text line or slots without a `font` handle, or `{ html, height }`.           | Omitted.                                                                             |
 
-### `registerFont(source)`
+### `registerFont(source)` and font sources
 
-| Name     | Info                                                                                                                                          | Allowed settings                                                                                                                                         | Default setting |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| `family` | Application-owned CSS family used in both the source and the registered handle. Names are trimmed and matched without case sensitivity.       | A nonempty custom name using ASCII letters, digits, spaces, hyphens or underscores. Generic families and CSS-wide keywords are rejected.                 | Required.       |
-| `data`   | Exact static font program. The registration copies the bytes and rejects conflicting programs for an existing family/weight/style descriptor. | A nonempty `Uint8Array` or `ArrayBuffer` containing a static TTF/OTF font. URL strings, WOFF/WOFF2, font collections and variable fonts are unsupported. | Required.       |
-| `weight` | Numeric weight of the supplied static face; provide a separate program for each used weight.                                                  | An integer from `1` to `1000`, such as `400` or `700`.                                                                                                   | `400`.          |
-| `style`  | Style of the supplied face; use a separate italic program instead of browser synthesis.                                                       | `'normal'` or `'italic'`.                                                                                                                                | `'normal'`.     |
+| Name       | Info                                                                                                                               | Allowed settings                                                                        | Default setting           |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------- |
+| `family`   | Explicit CSS family used by the source.                                                                                            | Nonempty supported name; generic families and CSS descriptor injection reject.          | Required.                 |
+| `data`     | Exact licensed font program; input bytes are copied.                                                                               | `Uint8Array`, `ArrayBuffer`, bare base64 or font data URL containing supported TTF/OTF. | Required.                 |
+| `weight`   | Declared face weight for font selection.                                                                                           | Integer `1`–`1000`; variable TTF must declare the upright default instance's weight.    | `400`.                    |
+| `style`    | Declared face style.                                                                                                               | `'normal'` or `'italic'`; variable TTF supports its upright default instance only.      | `'normal'`.               |
+| `document` | Browser document whose `FontFaceSet` owns the registration. Not used by document drawing or accepted by `renderHTML` font sources. | `Document`, usually `element.ownerDocument`.                                            | Current browser document. |
 
-### PDF output and per-element raster control
+System fonts, WOFF/WOFF2, collections and nondefault variable axes are unsupported.
+Register every used face. Static weight selection follows CSS nearest-face
+matching within the registered family; missing glyphs still reject.
 
-| Name                         | Info                                                                                                                                                                                 | Allowed settings                                                                               | Default setting                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `result.download(filename)`  | Downloads the already generated PDF. The method neither rerenders the source nor adds a filename extension.                                                                          | A nonempty filename without `/`, `\` or ASCII control characters. Include `.pdf` when desired. | `'document.pdf'`.                                  |
-| HTML `data-raster` attribute | Explicitly selects a subtree for one local raster capture. This is an HTML attribute, not a `renderPDF` option. The selected subtree must satisfy the raster safety and size limits. | Add the attribute, for example `<div data-raster>...</div>`, or leave it absent.               | Absent; `fallback` determines automatic selection. |
+### Header and footer fields
 
-`result.toBlob()` and `result.toUint8Array()` take no parameters. They return the
-same completed PDF in different forms without another conversion. `pageCount`
-and `warnings` are read-only result metadata.
+Each band uses one content form: `text`, `left`/`center`/`right`,
+`element` for `renderPDF`, or `html` for `renderHTML`.
+
+| Name                      | Info                                                                  | Allowed settings                                                                                                     | Default setting                    |
+| ------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `height`                  | Reserved CSS-pixel height in addition to the outer margin.            | Finite positive number fitting the band content and leaving positive body space.                                     | Required for a band.               |
+| `text`                    | One selectable line with page placeholders expanded after pagination. | String; optional `{pageNumber}` and `{pageCount}`.                                                                   | Required for the single-line form. |
+| `left`, `center`, `right` | Independent lines at the corresponding horizontal positions.          | One or more strings with the same page placeholders; lines must not overlap.                                         | Omitted slots are empty.           |
+| `font`                    | Exact registered text-band face in `renderPDF`.                       | A handle included in `fonts`.                                                                                        | First registered face.             |
+| `fontSize`                | Text-band character size in CSS pixels.                               | Finite positive number.                                                                                              | `12`.                              |
+| `align`                   | Alignment of the `text` form.                                         | `'left'`, `'center'` or `'right'`.                                                                                   | `'left'`.                          |
+| `element`                 | Static HTML measured once and repeated as PDF paint.                  | Connected `HTMLElement` in the source document, outside the source subtree, fitting printable width and band height. | Required for connected HTML.       |
+| `html`                    | Isolated fragment with its own inline styles; `renderHTML` only.      | Nonempty inert HTML; page placeholders are not expanded in HTML.                                                     | Required for HTML strings.         |
+
+### `imageToPDF(source, options?)`
+
+| Name          | Info                                                        | Allowed settings                                                                     | Default setting         |
+| ------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------- |
+| `source`      | Encoded image; main TIFF frames retain file order.          | `File`/`Blob`, `ArrayBuffer` or `Uint8Array` containing supported PNG, JPEG or TIFF. | Required.               |
+| `format`      | Paper size in CSS pixels.                                   | Same as `renderPDF.format`.                                                          | `'A4'`.                 |
+| `orientation` | Paper axes.                                                 | `'portrait'` or `'landscape'`.                                                       | `'portrait'`.           |
+| `margin`      | Space around centered, proportionally fitted image content. | Same as `renderPDF.margin`.                                                          | `24` on each edge.      |
+| `metadata`    | New PDF properties.                                         | Metadata object below.                                                               | Title `'RenderPDF.js'`. |
+| `signal`      | Cancels between reading, decoding, embedding and writing.   | `AbortSignal`.                                                                       | Omitted.                |
+| `onProgress`  | Stage-local counters; omits HTML `layout`/`pagination`.     | Synchronous progress callback.                                                       | Omitted.                |
+
+### Metadata fields
+
+Apply to HTML/image conversion, document creation and PDF composition.
+
+| Name       | Info                               | Allowed settings           | Default setting   |
+| ---------- | ---------------------------------- | -------------------------- | ----------------- |
+| `title`    | Human-readable document title.     | Unicode string.            | `'RenderPDF.js'`. |
+| `author`   | Author in PDF properties.          | Unicode string.            | Omitted.          |
+| `subject`  | Subject in PDF properties.         | Unicode string.            | Omitted.          |
+| `keywords` | Search terms copied before export. | Readonly array of strings. | Omitted.          |
+
+### `createDocument(options?)` and `createJsPDFAdapter(options?)`
+
+| Name          | Info                                                                    | Allowed settings                                                    | Default setting                               |
+| ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------- |
+| `unit`        | Coordinate/dimension unit; font sizes remain points.                    | `'pt'`, `'mm'` or `'px'`.                                           | `'pt'` for documents; `'mm'` for the adapter. |
+| `format`      | Default paper inherited by new pages; custom values use document units. | `'A4'`, `'A3'`, `'Letter'`, or finite positive `{ width, height }`. | `'A4'`.                                       |
+| `orientation` | Default axes, overridable on each page.                                 | `'portrait'` or `'landscape'`.                                      | `'portrait'`.                                 |
+| `fonts`       | Additional faces prepared before drawing and synchronous measurement.   | Font sources with `family`, `data` and optional `weight`/`style`.   | Built-in Helvetica, Times and Courier faces.  |
+| `metadata`    | New PDF properties.                                                     | Metadata object above.                                              | Title `'RenderPDF.js'`.                       |
+| `signal`      | Cooperative cancellation during preparation and serialization.          | `AbortSignal`.                                                      | Omitted.                                      |
+
+`createDocument` starts without pages; the adapter creates one initial page.
+`addPage()` and `insertPage()` accept `format` and `orientation` overrides and
+otherwise inherit document defaults. See the
+[API guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md)
+for drawing, fields, graphics state and tested adapter methods.
+
+### `mergePDFs`, `extractPDFPages` and `splitPDF`
+
+| Name                 | Info                                                                                         | Allowed settings                                                                | Default setting                                     |
+| -------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `sources` / `source` | Existing PDF input; caller fetches URLs. Merge takes an array; extract/split take one input. | `File`/`Blob`, `ArrayBuffer`, `Uint8Array` or result exposing `toUint8Array()`. | Required.                                           |
+| `pageNumbers`        | Extraction order, retaining duplicates.                                                      | Nonempty array of valid one-based page numbers.                                 | Required for extraction; merge/split use all pages. |
+| `flattenForms`       | Paints prepared ordinary AcroForm appearances before copying, removing interactivity.        | `true` or `false`; signed/XFA forms still reject.                               | `false`; interactive fields reject.                 |
+| `metadata`           | New properties; source properties are not merged.                                            | Metadata object above.                                                          | Title `'RenderPDF.js'`.                             |
+| `signal`             | Cancels between loading, copying and saving.                                                 | `AbortSignal`.                                                                  | Omitted.                                            |
+| `onProgress`         | Stage-local preparation/resources/pages/saving/complete counters.                            | Synchronous progress callback.                                                  | Omitted.                                            |
+
+See the [composition guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/API.md#pdf-composition)
+for input and structural limits.
+
+### Result output
+
+| Name                  | Info                                                     | Allowed settings                                            | Default setting                     |
+| --------------------- | -------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------- |
+| `download(filename?)` | Browser download of completed bytes without rerendering. | Nonempty filename without separators or control characters. | `'document.pdf'`.                   |
+| `toBlob()`            | Returns a Blob from completed bytes.                     | No parameters.                                              | MIME type `'application/pdf'`.      |
+| `toUint8Array()`      | Returns a defensive copy of completed bytes.             | No parameters.                                              | New independent array on each call. |
+
+`pageCount` and `warnings` are read-only result metadata. Callback exceptions
+reject the export; cooperative cancellation rejects with `AbortError`.
+
+### Repeated table headers, headers and footers
+
+```ts
+const pdf = await renderPDF(source, {
+  fonts: [regular],
+  repeatTableHeaders: true,
+  header: { text: 'Account statement', height: 32 },
+  footer: { height: 28, left: 'Printed by: Example', right: 'Page {pageNumber} of {pageCount}' },
+});
+await pdf.download('statement.pdf');
+```
+
+Header and footer `height` is required and reserves space **in addition to** the
+outer margins. Existing `{ text, height, align? }` usage still works. To draw
+independent selectable text, supply `left`, `center` and/or `right`; each uses the
+shared `font` (first registered face by default) and `fontSize` (default `12`).
+`{pageNumber}` and `{pageCount}` expand after pagination. Lines cannot wrap or
+overlap; a band too small for its content fails explicitly.
+
+For custom HTML, connect a separate `HTMLElement` in the source's document and
+pass `{ element, height }`. It must be outside the main source subtree and fit the
+printable width and reserved height. The renderer measures this element through
+the same supported HTML pipeline once, then repeats its PDF text and paint on each
+page. `renderHTML` also accepts `{ html, height }` strings for bands as shown above.
+HTML bands are static across pages; use a text slot for page-number placeholders.
+Custom CSS remains subject to the [supported scope](#supported-scope).
+
+### Export progress and document properties
+
+```ts
+const pdf = await renderPDF(source, {
+  fonts: [regular],
+  metadata: { title: 'Account statement', author: 'Example Company' },
+  onProgress: ({ stage, completed, total }) => {
+    console.log(stage, completed, total);
+  },
+});
+```
+
+Counters describe work within the current stage, rather than elapsed-time
+percentages. HTML stages are `preparing`, `layout`, `pagination`, `resources`,
+`pages`, `saving` and `complete`. Image conversion omits `layout` and `pagination`.
+Callbacks are synchronous; a thrown callback error rejects the export. Cancellation
+is cooperative between stages and rejects with `AbortError`, without a partial PDF.
+
+## Output and errors
+
+Both functions return the same result:
+
+```ts
+await pdf.download('document.pdf');
+const blob = await pdf.toBlob();
+const bytes = await pdf.toUint8Array();
+console.log(pdf.pageCount, pdf.warnings);
+```
+
+These output methods reuse the completed PDF. `RenderPDFError`, exported from the
+package, exposes a `code` and `message` for conversion failures. Warnings are
+available through `onWarning` for HTML exports and `pdf.warnings`. Unsupported
+input still fails explicitly when it cannot be represented safely. With the default
+`strictCss: false`, selected unsupported decoration is omitted as described above.
 
 ## Supported scope
 
-- Static block, inline, nonoverlapping Flexbox and Grid geometry with horizontal
-  Latin text, including Czech diacritics.
-- Solid backgrounds, uniform solid rectangular borders and browser-measured
-  padding, margins and alignment.
-- Native PNG/JPEG images loaded from data, blob, same-origin or CORS-readable URLs.
-  Other image formats fail explicitly. External images can require a browser
-  fetch at export time; document data is never submitted to a conversion service.
-  JPEG EXIF orientation must be absent or 1; normalize rotated image pixels first.
-- Legacy `FONT`, `CENTER`, inline `SMALL` and simple tables with separate borders. Table rows and
-  rowspan cells remain atomic; oversized atomic content fails.
-- A4, A3 and Letter, portrait/landscape, a numeric margin or four explicit edges.
-  Custom paper uses `format: { width: 500, height: 400 }`; dimensions include
-  margins. Landscape swaps the supplied base axes, including custom dimensions.
-  Page dimensions and margins use CSS pixels; `1 CSS px = 0.75 PDF pt`. The renderer preserves
-  source width and wrapping and fails if it exceeds the page's content width.
-- Automatic local fallback for gradients, inline bitmap backgrounds, rounded
-  corners, inset shadows and opacity on independently capturable rectangular
-  blocks. Plain parents stay native; a selected parent owns all nested effects
-  and is captured once in paint order. Descendant text adds extraction-only PDF
-  objects where safe. Layout/order/overlap guards also apply inside automatic
-  regions. Inline fragments and table-internal raster boundaries are rejected.
-  Raster resources must be inline bitmaps; external resources, backdrop effects,
-  transforms and effects outside the border box are rejected. An outer shadow on
-  a selected raster root is omitted by default because it exceeds the captured box.
-  Wrapped native inline backgrounds/borders need an explicit containing raster;
-  a single union rectangle cannot reproduce their separate line fragments.
-- Explicit `data-raster` remains available. `fallback: 'strict'` disables automatic
-  selection while honoring these caller-selected boundaries. Neither mode silently
-  substitutes a whole-document screenshot when a local feature cannot be rendered.
-- `strictCss: true` rejects the decorative CSS omissions listed here.
-  The default `false` omits outer box shadows and table row/group backgrounds;
-  collapsed table borders are rendered using the measured cell boxes without
-  reproducing the collapsed-border painting algorithm. These omissions do not
-  change the source DOM. `strictCss` is independent of the raster `fallback` mode.
-- `pageBreak: 'css'` (default) respects block/table-row `break-before: page` and
-  `break-after: page`, their legacy `page-break-*: always` aliases, and
-  `break-inside: avoid/avoid-page`. Before/after avoidance conservatively keeps
-  adjacent complete block siblings together when they fit. `pageBreak: 'auto'`
-  ignores authored fragmentation hints and uses only measured atomic geometry.
+HTML rendering supports static blocks, inline content, nonoverlapping Flexbox and
+Grid layouts, horizontal text in the scripts listed below, solid backgrounds,
+rectangular borders and native tables with `rowspan` and `colspan`.
 
-Page mapping keeps consecutive source intervals: native backgrounds and boxes may
-span pages, while measured text lines, images, raster regions, table rows and
-rowspan cells remain atomic. Fitting avoid blocks move intact to the next page.
-An oversized or incompatible avoid preference relaxes with `BREAK_AVOID_RELAXED`;
-it never authorizes cutting an atomic item. Forced breaks take precedence over
-soft avoidance, and coincident/root-edge rules create no empty pages. A forced
-break through an atomic object, including a raster descendant or spanning cell,
-fails with `PAGINATION_FAILED`. Atomic content taller than a page also fails.
+### Text and languages
 
-Keep the source static while exporting. The renderer waits for fonts and image
-decoding, observes source and stylesheet mutations, and checks computed styles and
-geometry across asynchronous stages. A changed source fails with `SOURCE_CHANGED`.
-Pause animations before export. Cancellation uses `signal: controller.signal` and
-rejects with the standard `AbortError`; it is cooperative between rendering
-stages. No partial PDF is returned. Temporary observers and download URLs are
-released.
+Horizontal HTML text is verified in Chromium with selectable PDF text for these
+scripts when the registered TTF/OTF font covers the characters used:
 
-## Diagnostics and limits
+- [x] Latin script, including diacritics
+- [x] Cyrillic script
+- [x] Chinese Han text, including line breaks without spaces
+- [x] Arabic text without vowel marks, including right-to-left and mixed-direction runs
 
-`RenderPDFError.code` distinguishes invalid options/source, missing fonts/glyphs,
-unsupported CSS/elements, failed resources, source changes/overflow, pagination,
-raster and PDF writing failures. Warnings are available through both `onWarning`
-and the immutable `result.warnings` collection, without runtime console logging.
+Set the source text's `lang` and `dir` where needed, and register suitable font
+faces for each CSS `font-family`. Other scripts have not been verified. Vertical
+writing modes are unsupported. HTML export currently embeds complete font
+programs, so a large Chinese font can substantially increase PDF size; the
+programmatic document API subsets embedded fonts.
+Arabic vowel marks render, but PDF text extraction can move a mark around a
+ligature; vocalized Arabic is not yet covered by the selectable-text guarantee.
 
-PDF text uses browser word origins and approximate baseline/word-width fitting.
-Exact within-word kerning, arbitrary ligatures, complex shaping, bidi and variable
-font instances are not a fidelity promise. There is no arbitrary CSS/stacking
-engine, collapsed table borders, repeated table headers or header/footer engine.
-Pagination is a measured source-to-page mapping, not full CSS Paged Media: parity
-breaks (`left/right/recto/verso`), column breaks, inline/cell break directives,
-margin-break rules, widow/orphan line-count policies and cloned page decorations
-are unsupported. Nondefault native `widows`/`orphans` and
-`box-decoration-break: clone` fail explicitly. Default line-count values are not
-enforced. Unsupported layout, text ownership, font and resource behavior can still
-fail in the default CSS omission mode; the renderer never drops document text to
-force an export.
-Direct text overlapping later visible paint is also rejected when the simple
-ordered paint list cannot reproduce the browser's block/inline paint phases.
+PNG/JPEG resources can use data, blob, same-origin or CORS-readable URLs. External
+images may be fetched by the browser; documents are never sent to a conversion
+service. Freshly fetched image bytes receive the same structural, dimension and
+PNG decompression checks as standalone image input. PNG/JPEG orientation in HTML
+must be absent or `1`; normalize rotated pixels before using an `<img>` element.
+
+Gradients, rounded corners, inline bitmap backgrounds, inset shadows and opacity
+can use local raster fallback on supported rectangular blocks. `data-raster`
+selects a region explicitly. Regions are captured once in paint order; descendant
+text gets an extraction layer where safe. Raster resources must be inline bitmaps;
+responsive images (`<picture>`, `<source>` and `img[srcset]`), external resources,
+transforms and backdrop effects are unsupported. Outer shadows on native elements
+and selected raster roots are omitted by default; `strictCss: true` rejects them.
+Outer shadows on descendants inside an existing raster region still reject.
+Inline event handlers and custom elements, including customized built-ins, are
+rejected before capture so cloning cannot repeat their application callbacks.
+Wrapped inline backgrounds or borders require a containing raster region; inline
+and table-internal raster boundaries are unsupported.
+
+### Pagination and tables
+
+The default `pageBreak: 'css'` respects block/table-row `break-before: page`,
+`break-after: page`, their legacy `page-break-*: always` aliases and
+`break-inside: avoid/avoid-page`. Before/after avoidance keeps adjacent complete
+block siblings together when they fit.
+
+Text lines, images, raster regions, table rows and spanning cells stay whole.
+Content taller than a page, or a forced break through an indivisible item, fails
+with `PAGINATION_FAILED`. An avoid preference that cannot be honored can be relaxed
+with a `BREAK_AVOID_RELAXED` warning. Parity/column breaks, inline/cell break rules,
+widow/orphan policies and cloned page decorations are unsupported.
+
+<details>
+<summary>Table restrictions</summary>
+
+Collapsed tables support solid, none and hidden borders on cells and the outer
+table, including different widths, colors and transparency. Shared borders are
+painted once. Row, row-group, column and column-group border contributions, other
+border styles, captions, nested collapsed tables and altered table-part display
+modes are unsupported.
+
+Repeated headers require a visible native `thead` followed by body rows. The
+header reserves space on continuation pages and stays with the first body row.
+Headers and rows must fit on a page. Nested tables, raster headers, overlapping
+table ranges, header rowspans and cells spanning the header/body boundary are
+unsupported. Header paint must fit its measured box. Table footers are not repeated.
+Collapsed tables also require matching resolved horizontal borders at every
+possible header/body continuation boundary.
+
+</details>
+
+### Text and layout limits
+
+Default kerning, ligatures and combining marks are supported. Keep shaped text runs
+in one text node; cross-inline ligatures and zero-width fragments are unsupported.
+Custom font features/variants, stretched faces, font-size adjustment, automatic
+hyphenation and soft hyphens are unsupported.
+Exact text appearance can vary between shaping engines.
+
+Arbitrary CSS stacking and overlapping paint are unsupported. Pause animations
+and keep source styles, geometry and registered fonts stable during export.
+Changes to the source fail with `SOURCE_CHANGED`. `verifySource: 'mutations'` is an
+explicit faster mode that checks observed DOM/stylesheet mutations but can miss
+CSSOM edits and computed-style-only changes; it emits
+`SOURCE_VERIFICATION_REDUCED`.
+
+### Image format limits
+
+- **PNG:** static images only; APNG is rejected.
+- **JPEG:** 8-bit baseline, extended and progressive grayscale, RGB or CMYK.
+- **TIFF:** classic stripped TIFF in either byte order; common bilevel/grayscale,
+  palette and 8-bit RGB/RGBA profiles. Compression: uncompressed, CCITT RLE/Group
+  3/Group 4, LZW, PackBits and Deflate. Limited to **40 million pixels per frame**
+  and **1,000 main frames**.
+
+BigTIFF, tiled TIFF, SubIFDs/RAW layouts, planar-separated samples, 16-bit/float
+samples and JPEG-compressed TIFF fail with `UNSUPPORTED_IMAGE`. The TIFF decoder
+uses a bounded packed-raster implementation for CCITT runs; the remaining TIFF
+codec/color-conversion dependency loads only when needed. Structural checks
+reject malformed input, but cannot identify every damaged JPEG scan or all
+possible unsupported image features.
+
+### Existing PDF input limits
+
+Composition checks the input container before the PDF backend loads it. Each
+object/xref stream may expand to at most **2 MiB**, with **16 MiB** total decoded
+structural streams, **100,000 structural entries**, **2 million container tokens**
+and **64 levels of container nesting** per composition. Page and form ownership
+trees must be acyclic, consistent and at most 64 levels deep. The existing
+1,000-page and encoded-input limits also apply.
+
+The supported profile requires a standalone PDF header line at byte zero,
+unsigned decimal structural indexes, uppercase hexadecimal name escapes, direct
+stream lengths and direct stream types when present. Object/xref streams support no filter or
+one direct `FlateDecode` filter without decoding parameters. Indirect control
+values, duplicate dictionary keys and unsupported structural filters fail with
+`INVALID_SOURCE`. Some otherwise valid PDFs therefore need normalization by
+their owner before composition.
+
+Additional/chained page, annotation and form actions are rejected; copied URI
+links support HTTP, HTTPS, mailto and tel only. Composition preserves PDF paint
+and resources and is not a general sanitizer for every PDF viewer feature.
 
 ## Development
 
-Source code lives in `src/`. Browser regression pages live in `tests/fixtures/`;
-their measurement helpers in `experiments/` use the same rendering pipeline as
-the public API. `npm run dev` serves these fixtures for development, while
-`npm run build` builds only the library.
+Use Node.js 22.18+ (22.x), 24.11+ (24.x) or 26+. `.node-version` records the
+verified runtime.
 
-Open `/tests/fixtures/rendering.html` for a basic export,
-`/tests/fixtures/hybrid.html` for mixed native/raster pagination, or
-`/tests/fixtures/document.html` for a local HTML chooser and PDF download.
+```sh
+npm ci
+npm run build
+npm run check
+```
 
-Vite+ provides the development server, builds, Oxlint, Oxfmt and Vitest. Shared
-lint, format and unit-test settings live in `vite.config.ts`; the library build
-uses `vite.library.config.ts` and TypeScript to generate declarations. The toolchain
-is installed locally by `npm ci`; a global Vite+ installation is optional.
+`npm run check` runs formatting, lint, types, unit tests, browser tests, build and
+package checks. Google Chrome must be installed for browser tests. Vite+ provides
+the development toolchain; Playwright and PDF.js are used for testing.
 
-The local document fixture deliberately uses one explicitly stated font family;
-the reusable API supports multiple families. Private documents and local system
-font programs belong only in ignored `artifacts/`; regression tests use synthetic
-documents and do not require them.
+Run `npm run dev` to serve synthetic test fixtures. The independent
+[playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playground)
+tests the packaged library. See the
+[benchmark guide](https://github.com/MichalekJan93/renderPDF.js/blob/main/BENCHMARKS.md)
+for `npm run benchmark` and timing reports.
 
-Run `npm run check` before submitting a change. It checks types, lint, unit tests,
-browser tests, builds, formatting and package contents. Browser tests require an installed Google
-Chrome and use synthetic fixtures, Playwright and PDF.js; those tools never run in
-conversion code. Generated PDFs, screenshots and reports stay outside versioned
-source files.
-
-See [tests/README.md](tests/README.md) for the test commands, coverage by file,
-verification methods and remaining coverage limits.
-
-### Local package
-
-`npm pack --pack-destination artifacts` builds the library and checks its contents
-before creating a local archive. Create the `artifacts/` directory first if it is
-absent. The package includes the ESM entry, TypeScript declarations, package metadata,
-README, MIT license and README logo. Demos, test fonts, source files and local
-documents are excluded by an explicit `files` allowlist.
-
-`npm run check:package` checks the current build through npm's dry-run inventory;
-run `npm run build:library` first when no build exists. The check rejects missing
-entry points, empty files and unexpected contents. Packaging does not publish the
-library; `private: true` remains enabled.
+To create a local package, create `artifacts/` if needed, then run
+`npm pack --pack-destination artifacts`. Only the library build, declarations,
+package metadata, README, API guide, changelog, license and logo are packaged. Keep private documents
+and generated files out of Git.
 
 ## License
 
-RenderPDF.js is licensed under the [MIT License](LICENSE). Bundled Noto Sans test
-fonts retain their [SIL Open Font License](public/fonts/OFL.txt); they are not
-bundled into the library entry. Third-party dependencies retain their own licenses.
+[MIT](https://github.com/MichalekJan93/renderPDF.js/blob/main/LICENSE).
+Third-party dependencies retain their own licenses: `utif2` uses MIT and `pako`
+retains MIT/Zlib notices. Noto Sans, Noto Serif, Arabic and CJK test fonts retain the
+[SIL Open Font License](https://github.com/MichalekJan93/renderPDF.js/blob/main/public/fonts/README.md)
+and are not included in the npm package.
+
+See [tests/README.md](tests/README.md) for commands, coverage by file, verification
+methods and remaining coverage limits.

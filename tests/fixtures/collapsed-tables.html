@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Synthetic collapsed table borders</title>
+    <style>
+      /* Padding retains the outer half of collapsed table strokes inside the source root. */
+      body {
+        margin: 0;
+        background: white;
+      }
+      main {
+        display: flow-root;
+        box-sizing: border-box;
+        width: 460px;
+        padding: 12px;
+        color: #163049;
+        background: white;
+        font: 14px/20px 'Collapsed Sans';
+      }
+      table {
+        width: 436px;
+        table-layout: fixed;
+        border-collapse: collapse;
+        border: 4px solid #142846;
+      }
+      th,
+      td {
+        box-sizing: border-box;
+        height: 40px;
+        padding: 6px 12px;
+        border: 2px solid #8299af;
+        font-weight: 400;
+        text-align: left;
+        background: white;
+      }
+      th {
+        background: #e1ebf5;
+      }
+      #conflicts thead th {
+        border-bottom: 4px solid #365473;
+      }
+      #wide-edge {
+        border-right: 6px solid rgb(20 80 140 / 50%);
+      }
+      #narrow-edge {
+        border-left: 4px solid #c83131;
+      }
+      #hidden-edge {
+        border-top: 8px hidden #c83131;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Fictional cells expose border ownership independently of private source documents. -->
+    <main id="collapsed">
+      <table id="conflicts">
+        <thead>
+          <tr>
+            <th colspan="2">COLSPAN HEADER</th>
+            <th>THIRD</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td id="spanning-cell" rowspan="2">SPAN</td>
+            <td id="wide-edge">A</td>
+            <td id="narrow-edge">B</td>
+          </tr>
+          <tr>
+            <td id="merged-cell" colspan="2">MERGED</td>
+          </tr>
+          <tr>
+            <td id="hidden-edge">C</td>
+            <td>D</td>
+            <td>E</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+    <main id="continued">
+      <table>
+        <thead>
+          <tr>
+            <th colspan="3">REPEATHEAD</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </main>
+  </body>
+</html>

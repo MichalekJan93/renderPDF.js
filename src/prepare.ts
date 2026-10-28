@@ -1,4 +1,5 @@
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
+import { computedStyle, isHtmlElement, isHtmlTag, isShadowRoot } from './dom.js';
 
 /** Wait for one browser stage while releasing the cancellation listener on every outcome. */
 export async function withCancellation<T>(
@@ -23,19 +24,22 @@ export function prepareSource(
   root: HTMLElement,
   /** Optional cancellation for fonts and image preparation. */
   signal?: AbortSignal,
+  /** Full CSSOM verification, or faster mutation-only checks with weaker guarantees. */
+  verifySource: 'full' | 'mutations' = 'full',
 ) {
   throwIfAborted(signal);
-  if (
-    typeof document === 'undefined' ||
-    !(root instanceof HTMLElement) ||
-    !root.isConnected ||
-    root.ownerDocument !== document
-  ) {
+  if (!root || !isHtmlElement(root) || !root.isConnected || !root.ownerDocument.defaultView) {
     throw new RenderPDFError(
       'INVALID_SOURCE',
-      'Provide a connected HTMLElement in the current document.',
+      'Provide a connected HTMLElement in a live browser document.',
     );
   }
+  if (verifySource !== 'full' && verifySource !== 'mutations') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'Source verification must be full or mutations.');
+  }
+  // All browser APIs must belong to the source realm, including a same-origin iframe.
+  const sourceDocument = root.ownerDocument;
+  const sourceWindow = sourceDocument.defaultView!;
   // Mutation monitoring begins synchronously, before the public async call yields to its caller.
   let changed = false;
   // The fingerprint is set after resource readiness, when normal font/image layout has settled.
@@ -43,7 +47,7 @@ export function prepareSource(
   // Repeated CSS names/values share an exact identifier for this export, never a cached DOM read.
   const identifiers = new Map<string, number>();
   // Source changes, ancestor attributes and stylesheets can invalidate browser coordinates.
-  const observer = new MutationObserver(() => {
+  const observer = new sourceWindow.MutationObserver(() => {
     changed = true;
   });
   // Ancestors can change clipping, opacity or transforms through CSSOM without a DOM edit.
@@ -53,7 +57,7 @@ export function prepareSource(
   let ancestor: Element | null = root.parentElement;
   // A detached shadow parent is represented by its host rather than parentElement.
   const tree = root.getRootNode();
-  if (tree instanceof ShadowRoot) {
+  if (isShadowRoot(tree)) {
     observer.observe(tree, {
       subtree: true,
       attributes: true,
@@ -67,11 +71,9 @@ export function prepareSource(
     observer.observe(ancestor, { attributes: true });
     ancestor =
       ancestor.parentElement ??
-      (ancestor.getRootNode() instanceof ShadowRoot
-        ? (ancestor.getRootNode() as ShadowRoot).host
-        : null);
+      (isShadowRoot(ancestor.getRootNode()) ? (ancestor.getRootNode() as ShadowRoot).host : null);
   }
-  observer.observe(document.head, {
+  observer.observe(sourceDocument.head, {
     subtree: true,
     attributes: true,
     childList: true,
@@ -79,9 +81,12 @@ export function prepareSource(
   });
   // CSSOM lists the same browser-supported properties first, followed by element-specific custom names.
   // Cache only those fixed names; every computed value is still read again at each assertion.
-  const standardProperties = Array.from(getComputedStyle(document.documentElement)).filter(
-    (property) => !property.startsWith('--'),
-  );
+  const standardProperties =
+    verifySource === 'full'
+      ? Array.from(computedStyle(sourceDocument.documentElement)).filter(
+          (property) => !property.startsWith('--'),
+        )
+      : [];
 
   /** Capture computed styles and root-relative geometry, including CSSOM-only stylesheet edits. */
   function currentFingerprint(): string {
@@ -113,7 +118,7 @@ export function prepareSource(
       pseudo?: string,
     ): void {
       // CSSOM rule edits do not create MutationObserver records, so inspect their computed effect.
-      const style = getComputedStyle(element, pseudo);
+      const style = computedStyle(element, pseudo);
       append(pseudo ?? 'element');
       if (pseudo) {
         append(style.content);
@@ -156,7 +161,7 @@ export function prepareSource(
     if (
       !root.isConnected ||
       changed ||
-      (fingerprint !== undefined && currentFingerprint() !== fingerprint)
+      (verifySource === 'full' && fingerprint !== undefined && currentFingerprint() !== fingerprint)
     ) {
       throw new RenderPDFError(
         'SOURCE_CHANGED',
@@ -181,19 +186,16 @@ export function prepareSource(
       );
     }
     // Synchronous measurement and this baseline observe one browser state in the same task.
-    fingerprint = currentFingerprint();
+    if (verifySource === 'full') fingerprint = currentFingerprint();
   }
 
   /** Settle browser resources once, without modifying source markup or dimensions. */
   async function ready(): Promise<void> {
-    await withCancellation(document.fonts.ready, signal);
+    await withCancellation(sourceDocument.fonts.ready, signal);
     try {
       await withCancellation(
         Promise.all(
-          [
-            ...root.querySelectorAll('img'),
-            ...(root instanceof HTMLImageElement ? [root] : []),
-          ].map(
+          [...root.querySelectorAll('img'), ...(isHtmlTag(root, 'img') ? [root] : [])].map(
             /** decode() also waits for a pending same-origin or CORS image request. */
             (image) => image.decode(),
           ),

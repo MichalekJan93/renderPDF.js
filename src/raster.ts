@@ -1,6 +1,8 @@
 import { toPng } from 'html-to-image';
 import type { RegisteredFont } from './api-types.js';
 import { RenderPDFError } from './diagnostics.js';
+import { computedStyle, isHtmlElement, isHtmlTag } from './dom.js';
+import { resolveRegisteredFont } from './fonts.js';
 
 /** Bounds the memory of the experiment's temporary canvas, in physical pixels. */
 const MAX_RASTER_PIXELS = 16_777_216;
@@ -69,25 +71,44 @@ function assertSelfContained(
   const rootBounds = element.getBoundingClientRect();
   // Include the region itself when checking resources and context-dependent effects.
   const descendants = [element, ...element.querySelectorAll('*')];
+  // Programmatic customized built-ins can serialize is= without exposing an is attribute.
+  const nativePrototypes = new Map<string, object | null>();
   for (const descendant of descendants) {
-    if (!(descendant instanceof HTMLElement)) {
+    if (!isHtmlElement(descendant)) {
       throw new RenderPDFError(
         'RASTER_FAILED',
         'Raster capture supports HTML subtrees only; inline SVG needs a separate experiment.',
       );
     }
-    if (
-      descendant.shadowRoot ||
-      descendant.tagName.includes('-') ||
-      descendant.tagName === 'SLOT'
-    ) {
-      throw new RenderPDFError(
-        'RASTER_FAILED',
-        'Raster capture does not inspect shadow trees or distributed slot content in supported renderer.',
+    // Never instantiate a custom tag while obtaining the native same-tag prototype.
+    if (!descendant.localName.includes('-') && !nativePrototypes.has(descendant.localName)) {
+      nativePrototypes.set(
+        descendant.localName,
+        Object.getPrototypeOf(element.ownerDocument.createElement(descendant.localName)),
       );
     }
     if (
-      /^(CANVAS|IFRAME|OBJECT|EMBED|VIDEO|AUDIO|INPUT|TEXTAREA|SELECT|SCRIPT|STYLE|LINK)$/.test(
+      descendant.shadowRoot ||
+      descendant.tagName.includes('-') ||
+      descendant.tagName === 'SLOT' ||
+      descendant.hasAttribute('is') ||
+      Object.getPrototypeOf(descendant) !== nativePrototypes.get(descendant.localName)
+    ) {
+      throw new RenderPDFError(
+        'RASTER_FAILED',
+        'Raster capture does not support custom elements, customized built-ins, shadow trees or distributed slot content.',
+      );
+    }
+    // Cloned inline handlers can run again when the clone reloads its local images.
+    if (Array.from(descendant.attributes).some((attribute) => /^on/i.test(attribute.name))) {
+      throw new RenderPDFError(
+        'RASTER_FAILED',
+        'Raster capture does not support inline event handlers.',
+      );
+    }
+    // Cloning picture sources can fetch img.src even when currentSrc is an inline bitmap.
+    if (
+      /^(CANVAS|IFRAME|FRAME|FRAMESET|OBJECT|EMBED|VIDEO|AUDIO|PICTURE|SOURCE|INPUT|TEXTAREA|SELECT|SCRIPT|STYLE|LINK|TEMPLATE)$/.test(
         descendant.tagName,
       )
     ) {
@@ -98,7 +119,7 @@ function assertSelfContained(
     }
 
     // Use the same computed declarations that html-to-image copies into its clone.
-    const style = getComputedStyle(descendant);
+    const style = computedStyle(descendant);
     assertInlineResources(style);
     if (style.mixBlendMode !== 'normal' || style.backdropFilter !== 'none') {
       throw new RenderPDFError(
@@ -165,7 +186,7 @@ function assertSelfContained(
     // Generated content has separate geometry and no extraction counterpart in this experiment.
     for (const pseudo of ['::before', '::after']) {
       // Pseudo-elements with even empty content can paint backgrounds or borders.
-      const content = getComputedStyle(descendant, pseudo).content;
+      const content = computedStyle(descendant, pseudo).content;
       if (content !== 'none' && content !== 'normal') {
         throw new RenderPDFError(
           'RASTER_FAILED',
@@ -174,8 +195,13 @@ function assertSelfContained(
       }
     }
 
-    if (descendant instanceof HTMLImageElement) {
-      if (descendant.srcset || !INLINE_BITMAP.test(descendant.currentSrc || descendant.src)) {
+    if (isHtmlTag(descendant, 'img')) {
+      // The clone reads src; currentSrc can instead come from a picture outside this region.
+      if (
+        descendant.srcset ||
+        !INLINE_BITMAP.test(descendant.src) ||
+        !INLINE_BITMAP.test(descendant.currentSrc || descendant.src)
+      ) {
         throw new RenderPDFError(
           'RASTER_FAILED',
           'Raster capture requires inline bitmap images without srcset.',
@@ -201,25 +227,8 @@ function assertSelfContained(
           'Raster capture requires a serializable computed font shorthand to preserve exact font sizes.',
         );
       }
-      // The first CSS family must match an explicit font; browser fallbacks cannot be embedded.
-      const family = style.fontFamily
-        .split(',')[0]
-        ?.trim()
-        .replace(/^["']|["']$/g, '');
-      if (
-        !fonts.some(
-          /** Candidate registered face used instead of operating-system font discovery. */
-          (font) =>
-            font.family.toLowerCase() === family?.toLowerCase() &&
-            font.weight === Number(style.fontWeight) &&
-            font.style === style.fontStyle,
-        )
-      ) {
-        throw new RenderPDFError(
-          'RASTER_FAILED',
-          'Raster capture text requires an explicitly registered matching font face.',
-        );
-      }
+      // One shared resolver keeps native and raster text on the same browser-selected face.
+      resolveRegisteredFont(style, fonts);
     }
 
     // Ignore hidden descendants, whose zero geometry cannot escape the capture.
@@ -263,10 +272,10 @@ export async function captureRaster(
   /** Remove only this raster root's unsupported outer shadow in the cloned image. */
   omitOuterShadow = false,
 ): Promise<Uint8Array> {
-  if (!element.isConnected || element.ownerDocument !== document) {
+  if (!element.isConnected || !element.ownerDocument.defaultView) {
     throw new RenderPDFError(
       'RASTER_FAILED',
-      'Raster capture requires a connected element in the current document.',
+      'Raster capture requires a connected element in a live document.',
     );
   }
   if (!Number.isFinite(scale) || scale <= 0) {
@@ -285,7 +294,7 @@ export async function captureRaster(
     );
   }
 
-  await document.fonts.ready;
+  await element.ownerDocument.fonts.ready;
   // Match the browser's measured border box and preserve fractional CSS dimensions.
   const { width, height } = element.getBoundingClientRect();
   // Transparent padding carries a fractional source origin within an integer-aligned image.
@@ -311,7 +320,7 @@ export async function captureRaster(
 
   assertSelfContained(element, fonts, omitOuterShadow);
   // Keep inset layers while dropping any shadow that paints outside the selected border box.
-  const insetShadows = getComputedStyle(element)
+  const insetShadows = computedStyle(element)
     .boxShadow.split(/,(?![^(]*\))/)
     .filter((shadow) => /\binset\b/.test(shadow))
     .join(', ');
@@ -321,7 +330,7 @@ export async function captureRaster(
   // Upstream behavior: https://github.com/bubkoo/html-to-image/blob/v1.11.13/src/clone-node.ts#L139-L143
   const includeStyleProperties = [
     'font',
-    ...Array.from(getComputedStyle(element)).filter(
+    ...Array.from(computedStyle(element)).filter(
       /** Preserve every other computed longhand after setting the exact font shorthand. */
       (property) => property !== 'font-size',
     ),

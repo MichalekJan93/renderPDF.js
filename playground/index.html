@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5180; base-uri 'none'; form-action 'none'"
+    />
+    <meta
+      name="description"
+      content="Local HTML-to-PDF export comparison with RenderPDF.js and jsPDF."
+    />
+    <link rel="icon" href="data:," />
+    <title>RenderPDF.js vs jsPDF · HTML to PDF</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <p class="eyebrow">RenderPDF.js / jsPDF</p>
+        <h1>Compare HTML-to-PDF exports</h1>
+        <p class="introduction">
+          Upload HTML, inspect the preview, and download PDFs from both libraries with one click.
+          Compare conversion time and file size. Your document is processed locally in the browser.
+        </p>
+      </header>
+
+      <main class="workspace">
+        <section class="editor-panel" aria-labelledby="editor-title">
+          <div class="panel-heading">
+            <div>
+              <p class="step-label">01 / Input</p>
+              <h2 id="editor-title">Your document</h2>
+            </div>
+            <button id="reset-example" class="button-secondary" type="button">Load example</button>
+          </div>
+
+          <label for="html-file">Upload an HTML file</label>
+          <input
+            id="html-file"
+            type="file"
+            accept=".html,.htm,text/html"
+            aria-describedby="file-help"
+          />
+          <p id="file-help" class="field-help">A UTF-8 .html or .htm file, up to 10 MiB.</p>
+          <label for="html-input">HTML document</label>
+          <p id="input-help" class="field-help">
+            You can also edit the loaded HTML or paste a complete static document with CSS. Scripts
+            and external resources are unsupported; embed PNG/JPEG images as data URLs. Unavailable
+            images are marked in the preview and block export until replaced.
+          </p>
+          <textarea
+            id="html-input"
+            aria-describedby="input-help"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            placeholder="<h1>My document</h1>"
+          ></textarea>
+
+          <label class="checkbox-label" for="strict-css">
+            <input id="strict-css" type="checkbox" />
+            Reject omitted CSS effects
+          </label>
+          <label class="checkbox-label" for="respect-page-breaks">
+            <input
+              id="respect-page-breaks"
+              type="checkbox"
+              checked
+              aria-describedby="page-break-help"
+            />
+            Respect HTML page breaks
+          </label>
+          <p id="page-break-help" class="field-help">
+            Applies to RenderPDF.js. Turn this off to ignore forced breaks and keep-together hints.
+            Pages fill the available space; table rows remain undivided.
+          </p>
+
+          <div class="actions">
+            <button id="refresh-preview" class="button-secondary" type="button">
+              Update preview
+            </button>
+            <button id="export-pdfs" class="button-primary" type="button" disabled>
+              Export and compare PDFs
+            </button>
+          </div>
+          <p id="status" class="status" role="status" aria-live="polite">
+            Preparing the example document…
+          </p>
+          <ul id="warnings" class="warnings" aria-label="Conversion limitations" hidden></ul>
+
+          <section id="results" class="results" aria-labelledby="results-title" hidden>
+            <h3 id="results-title">Export results</h3>
+            <div class="results-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Library</th>
+                    <th>Time</th>
+                    <th>Size</th>
+                    <th>Pages</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr id="render-result">
+                    <th>RenderPDF.js</th>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                  </tr>
+                  <tr id="jspdf-result">
+                    <th>jsPDF</th>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p id="winner" class="winner" aria-live="polite"></p>
+          </section>
+
+          <aside class="rendering-note" aria-label="Conversion settings">
+            <strong>Comparison settings</strong>
+            <p>
+              Both libraries receive the same preview with local Noto Sans fonts, A4 pages, and 24
+              CSS px margins. RenderPDF.js omits outer shadows and some table styles by default; the
+              rejection checkbox makes those effects fail instead. Timing includes conversion and
+              PDF serialization, excluding preview preparation and browser download handling.
+              Different rendering and pagination methods can change appearance and page count.
+              RenderPDF.js is experimental.
+            </p>
+          </aside>
+        </section>
+
+        <section class="preview-panel" aria-labelledby="preview-title">
+          <div class="panel-heading preview-heading">
+            <div>
+              <p class="step-label">02 / Preview</p>
+              <h2 id="preview-title">HTML before conversion</h2>
+            </div>
+            <span class="format-label">A4 · 100 %</span>
+          </div>
+          <p class="preview-help">
+            The preview is continuous; pagination is applied during PDF export.
+          </p>
+          <div class="preview-paper">
+            <div id="preview-host" aria-label="Uploaded HTML preview"></div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        Independent test application · uses the packaged renderpdf-js library and jsPDF
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

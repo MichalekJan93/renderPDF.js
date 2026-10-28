@@ -1,23 +1,33 @@
 import fontkit from '@pdf-lib/fontkit';
 import {
   PDFDocument,
+  beginText,
   clip,
   endPath,
+  endText,
   popGraphicsState,
   pushGraphicsState,
   rectangle,
   rgb,
-  setCharacterSqueeze,
+  setFillingColor,
+  setFontAndSize,
+  setGraphicsState,
+  setTextMatrix,
   setTextRenderingMode,
+  showText,
   TextRenderingMode,
 } from 'pdf-lib';
-import type { PDFFont, PDFImage, PDFPage } from 'pdf-lib';
-import type { PageGeometry, RegisteredFont } from './api-types.js';
+import type { PDFFont, PDFImage, PDFName, PDFPage } from 'pdf-lib';
+import type { PageGeometry, PDFMetadata, RegisteredFont, RenderProgress } from './api-types.js';
 import { RenderPDFError, throwIfAborted } from './diagnostics.js';
+import { applyPDFMetadata } from './export-options.js';
+import { inspectBitmap, validatePngData } from './image-input.js';
 import { nativeImageFormat } from './images.js';
+import type { PageText, PreparedPageBand } from './page-bands.js';
 import type { PageSlice } from './pagination.js';
 import { captureRaster } from './raster.js';
-import type { Bounds, LayoutSnapshot, TextOperation } from './types.js';
+import { PositionedFont } from './text.js';
+import type { Bounds, LayoutSnapshot, PaintOperation, TextOperation } from './types.js';
 
 /** CSS reference pixels convert to PDF points only at this adapter boundary. */
 const PX_TO_PT = 0.75;
@@ -30,8 +40,18 @@ export interface PDFWriteOptions {
   includeRasterText?: boolean;
   /** Omit a raster root's unsupported outer shadow without changing the source. */
   omitUnsupportedCss?: boolean;
+  /** Uniform source-to-paper ratio; page bands remain at their original physical size. */
+  sourceScale?: number;
   /** Stop before beginning subsequent asynchronous writing stages. */
   signal?: AbortSignal;
+  /** Prepared text or HTML placed above the source, outside its page clip. */
+  header?: PreparedPageBand;
+  /** Prepared text or HTML placed below the source, outside its page clip. */
+  footer?: PreparedPageBand;
+  /** Owned Unicode document properties, resolved before preparation begins. */
+  metadata?: Readonly<PDFMetadata>;
+  /** Internal awaited reporter; public application callbacks remain synchronous. */
+  reportProgress?: (progress: RenderProgress) => Promise<void>;
 }
 
 /** Serialized PDF and the exact source intervals used for page ownership. */
@@ -50,6 +70,8 @@ interface EmbeddedFace {
   font: PDFFont;
   /** Code points supported by the embedded program, never a silent substitute. */
   characters: ReadonlySet<number>;
+  /** Shaped glyph origins and extraction maps reusable for repeated words. */
+  positioned: PositionedFont;
 }
 
 /** Parse the computed sRGB colors admitted by the supported layout subset. */
@@ -76,7 +98,7 @@ function matchingFont(
   text: TextOperation,
   /** Embedded programs and their reusable coverage sets. */
   faces: readonly EmbeddedFace[],
-): PDFFont {
+): EmbeddedFace {
   // Case-insensitive family matching follows the explicit browser registration contract.
   const face = faces.find(
     /** A face must match all three descriptors; a synthetic browser face is unsupported. */
@@ -99,44 +121,161 @@ function matchingFont(
       );
     }
   }
-  return face.font;
+  return face;
 }
 
-/** Paint measured words at browser origins while retaining each word's ligatures. */
+/** Page resource names are reused without depending on private PDFPage fields. */
+interface TextResources {
+  /** Public font references registered once for each page and exact face. */
+  fonts: Map<PDFFont, PDFName>;
+  /** Text opacity resources shared by equal alpha values within this page. */
+  opacity: Map<number, PDFName>;
+}
+
+/** Paint shaped glyphs at measured run origins without scaling glyph outlines. */
 function drawLine(
   /** PDF page owning this complete measured line. */
   page: PDFPage,
   /** Browser line origins and baseline in source CSS pixels. */
   text: TextOperation,
   /** Matching embedded font program. */
-  font: PDFFont,
+  face: EmbeddedFace,
   /** Inclusive source top of the current page, in CSS pixels. */
   start: number,
   /** Page edges and margins in CSS pixels. */
   geometry: PageGeometry,
+  /** Resource caches owned by this one PDF page. */
+  resources: TextResources,
+  /** Uniform source scale, with one for page text outside the source. */
+  sourceScale = 1,
 ): void {
   // Text rendering mode 3 preserves extraction without painting a second visible copy.
   const color = parseColor(text.color);
-  for (const run of text.runs) {
-    // pdf-lib discards fontkit positioning; shorter runs limit accumulated advance drift.
-    const nativeWidth = font.widthOfTextAtSize(run.text, text.fontSize);
-    // shortcut: word-width fitting approximates kerning until positioned glyphs are supported.
-    const squeeze = nativeWidth > 0 ? (run.width / nativeWidth) * 100 : 100;
-    page.pushOperators(
-      pushGraphicsState(),
-      setCharacterSqueeze(squeeze),
-      setTextRenderingMode(text.invisible ? TextRenderingMode.Invisible : TextRenderingMode.Fill),
-    );
-    page.drawText(run.text, {
-      font,
-      size: text.fontSize * PX_TO_PT,
-      x: (geometry.margin.left + run.x) * PX_TO_PT,
-      y: (geometry.height - geometry.margin.top - (text.baseline - start)) * PX_TO_PT,
-      color: color.color,
-      opacity: color.opacity,
-    });
-    page.pushOperators(popGraphicsState());
+  let fontName = resources.fonts.get(face.font);
+  if (!fontName) {
+    fontName = page.node.newFontDictionary(face.font.name, face.font.ref);
+    resources.fonts.set(face.font, fontName);
   }
+  page.pushOperators(pushGraphicsState(), setFillingColor(color.color));
+  if (color.opacity !== 1) {
+    let opacity = resources.opacity.get(color.opacity);
+    if (!opacity) {
+      opacity = page.node.newExtGState(
+        'TextOpacity',
+        page.doc.context.obj({ Type: 'ExtGState', ca: color.opacity }),
+      );
+      resources.opacity.set(color.opacity, opacity);
+    }
+    page.pushOperators(setGraphicsState(opacity));
+  }
+  page.pushOperators(
+    beginText(),
+    setFontAndSize(fontName, text.fontSize * sourceScale * PX_TO_PT),
+    setTextRenderingMode(text.invisible ? TextRenderingMode.Invisible : TextRenderingMode.Fill),
+  );
+  const scale = (text.fontSize * sourceScale * PX_TO_PT) / face.positioned.unitsPerEm;
+  const baseline =
+    (geometry.height - geometry.margin.top - (text.baseline - start) * sourceScale) * PX_TO_PT;
+  for (const run of text.runs) {
+    const x = (geometry.margin.left + run.x * sourceScale) * PX_TO_PT;
+    for (const glyph of face.positioned.shape(run.text, text.kerning ?? true)) {
+      page.pushOperators(
+        setTextMatrix(1, 0, 0, 1, x + glyph.x * scale, baseline + glyph.y * scale),
+        showText(glyph.encoded),
+      );
+    }
+  }
+  page.pushOperators(endText(), popGraphicsState());
+}
+
+/** Prepare a single shaped, selectable page line after the final page count is known. */
+function pageTextLine(
+  /** Validated immutable band settings. */
+  band: PageText,
+  /** One-based physical page number. */
+  pageNumber: number,
+  /** Final page total, including all table continuation pages. */
+  pageCount: number,
+  /** Reserved band top in CSS pixels from the paper's top edge. */
+  top: number,
+  /** Original page margins defining horizontal alignment. */
+  geometry: PageGeometry,
+  /** Exact embedded face programs with shaped glyph metrics. */
+  faces: readonly EmbeddedFace[],
+): TextOperation {
+  const text = band.text
+    .replaceAll('{pageNumber}', String(pageNumber))
+    .replaceAll('{pageCount}', String(pageCount));
+  const face = faces.find((candidate) => candidate.definition === band.font)!;
+  const scale = band.fontSize / face.positioned.unitsPerEm;
+  const metrics = face.positioned.measure(text);
+  const width = (metrics.right - metrics.left) * scale;
+  const height = (metrics.ascent + metrics.descent) * scale;
+  const availableWidth = geometry.width - geometry.margin.left - geometry.margin.right;
+  if (width > availableWidth + 0.01 || height > band.height + 0.01) {
+    throw new RenderPDFError(
+      'SOURCE_OVERFLOW',
+      'Page header/footer text does not fit its reserved height or page content width; increase its area or reduce fontSize.',
+    );
+  }
+  const offset =
+    band.align === 'right'
+      ? availableWidth - width
+      : band.align === 'center'
+        ? (availableWidth - width) / 2
+        : 0;
+  const x = offset - metrics.left * scale;
+  // drawLine expects root coordinates; these page bands use the original top margin as origin.
+  const y = top - geometry.margin.top + (band.height - height) / 2;
+  return {
+    kind: 'text',
+    bounds: { x: offset, y, width, height },
+    text,
+    runs: [{ text, x, width }],
+    baseline: y + metrics.ascent * scale,
+    fontSize: band.fontSize,
+    family: band.font.family,
+    weight: band.font.weight,
+    style: band.font.style,
+    color: 'rgb(0, 0, 0)',
+    invisible: false,
+  };
+}
+
+/** Expand one or three selectable page lines and reject text that would paint over another slot. */
+function pageBandLines(
+  /** Immutable prepared band; HTML is painted as an embedded PDF page instead. */
+  band: PreparedPageBand | undefined,
+  /** One-based page number after final pagination. */
+  pageNumber: number,
+  /** Physical page total used by placeholders. */
+  pageCount: number,
+  /** Band top edge in CSS pixels from the physical paper edge. */
+  top: number,
+  /** Original paper and printable width in CSS pixels. */
+  geometry: PageGeometry,
+  /** Embedded programs whose metrics match text drawing. */
+  faces: readonly EmbeddedFace[],
+): TextOperation[] {
+  if (!band || ('kind' in band && band.kind === 'html')) return [];
+  const settings = 'kind' in band ? band.lines : [band];
+  const lines = settings.map((line) =>
+    pageTextLine(line, pageNumber, pageCount, top, geometry, faces),
+  );
+  for (const [index, first] of lines.entries()) {
+    matchingFont(first, faces);
+    for (const second of lines.slice(index + 1)) {
+      if (
+        first.bounds.x < second.bounds.x + second.bounds.width - 0.01 &&
+        second.bounds.x < first.bounds.x + first.bounds.width - 0.01 &&
+        first.bounds.y < second.bounds.y + second.bounds.height - 0.01 &&
+        second.bounds.y < first.bounds.y + first.bounds.height - 0.01
+      ) {
+        throw new RenderPDFError('SOURCE_OVERFLOW', 'Page header/footer text slots overlap.');
+      }
+    }
+  }
+  return lines;
 }
 
 /** Expand a raster placement to whole CSS pixels without shifting visible content. */
@@ -178,7 +317,19 @@ async function embedImage(
     // Inspect actual signatures rather than trusting a filename or server Content-Type.
     const bytes = new Uint8Array(await response.arrayBuffer());
     throwIfAborted(signal);
-    if (nativeImageFormat(bytes) === 'png') {
+    // The export response can differ from the already-decoded browser image; validate these exact bytes.
+    const bitmap = inspectBitmap(bytes);
+    // HTML image placement cannot apply the standalone image API's EXIF transformation.
+    nativeImageFormat(bytes);
+    if (bitmap.orientation !== 1) {
+      throw new RenderPDFError(
+        'RESOURCE_LOAD_FAILED',
+        'HTML image orientation must be 1; normalize its pixels before exporting.',
+      );
+    }
+    if (bitmap.format === 'png') {
+      await validatePngData(bytes, signal);
+      throwIfAborted(signal);
       return await pdf.embedPng(bytes);
     }
     return await pdf.embedJpg(bytes);
@@ -208,21 +359,63 @@ export async function writePDF(
 ): Promise<PDFWriteResult> {
   try {
     throwIfAborted(options.signal);
-    if (snapshot.width > geometry.width - geometry.margin.left - geometry.margin.right) {
+    const sourceScale = options.sourceScale ?? 1;
+    if (!Number.isFinite(sourceScale) || sourceScale <= 0 || sourceScale > 1) {
+      throw new RenderPDFError(
+        'INVALID_OPTIONS',
+        'Source scale must be greater than zero and at most one.',
+      );
+    }
+    if (
+      snapshot.width * sourceScale >
+      geometry.width - geometry.margin.left - geometry.margin.right + 0.01
+    ) {
       throw new RenderPDFError('SOURCE_OVERFLOW', 'Source is wider than the PDF content area.');
     }
     // The PDF dependency stays behind this adapter and receives only explicit font programs.
     const pdf = await PDFDocument.create();
     throwIfAborted(options.signal);
     pdf.registerFontkit(fontkit);
-    pdf.setTitle('RenderPDF.js');
+    applyPDFMetadata(pdf, options.metadata);
+    // Resources count processed fonts, local paint and prepared HTML forms.
+    const resourceTotal = options.reportProgress
+      ? fonts.length +
+        snapshot.operations.filter(
+          (operation) => operation.kind === 'image' || operation.kind === 'raster',
+        ).length +
+        Number(
+          options.header !== undefined &&
+            'kind' in options.header &&
+            options.header.kind === 'html',
+        ) +
+        Number(
+          options.footer !== undefined &&
+            'kind' in options.footer &&
+            options.footer.kind === 'html',
+        )
+      : 0;
+    let resourceCompleted = 0;
+    if (options.reportProgress)
+      await options.reportProgress({ stage: 'resources', completed: 0, total: resourceTotal });
     // Full embedding avoids subset/ligature mapping complications without using private APIs.
     const faces: EmbeddedFace[] = [];
     for (const definition of fonts) {
       throwIfAborted(options.signal);
       // Cache coverage once per embedded face rather than rebuilding it for every line.
       const font = await pdf.embedFont(definition.bytes);
-      faces.push({ definition, font, characters: new Set(font.getCharacterSet()) });
+      faces.push({
+        definition,
+        font,
+        characters: new Set(font.getCharacterSet()),
+        positioned: new PositionedFont(font, definition.bytes),
+      });
+      resourceCompleted += 1;
+      if (options.reportProgress)
+        await options.reportProgress({
+          stage: 'resources',
+          completed: resourceCompleted,
+          total: resourceTotal,
+        });
     }
     // Validate every line before allocating any potentially expensive raster capture.
     for (const operation of snapshot.operations) {
@@ -232,6 +425,52 @@ export async function writePDF(
       ) {
         matchingFont(operation, faces);
       }
+    }
+    // Validate page-specific placeholders and slot overlap before allocating raster captures.
+    const pageLines = slices.map((_, index) => ({
+      header: pageBandLines(
+        options.header,
+        index + 1,
+        slices.length,
+        geometry.margin.top,
+        geometry,
+        faces,
+      ),
+      footer: pageBandLines(
+        options.footer,
+        index + 1,
+        slices.length,
+        geometry.height - geometry.margin.bottom - (options.footer?.height ?? 0),
+        geometry,
+        faces,
+      ),
+    }));
+    // An HTML band is rendered once as a vector/text PDF form and reused on every page.
+    const embeddedHeader =
+      options.header && 'kind' in options.header && options.header.kind === 'html'
+        ? (await pdf.embedPdf(options.header.bytes))[0]
+        : undefined;
+    if (embeddedHeader) {
+      resourceCompleted += 1;
+      if (options.reportProgress)
+        await options.reportProgress({
+          stage: 'resources',
+          completed: resourceCompleted,
+          total: resourceTotal,
+        });
+    }
+    const embeddedFooter =
+      options.footer && 'kind' in options.footer && options.footer.kind === 'html'
+        ? (await pdf.embedPdf(options.footer.bytes))[0]
+        : undefined;
+    if (embeddedFooter) {
+      resourceCompleted += 1;
+      if (options.reportProgress)
+        await options.reportProgress({
+          stage: 'resources',
+          completed: resourceCompleted,
+          total: resourceTotal,
+        });
     }
     // Raster resources are captured exactly once per operation before ordered composition.
     const images = new Map<object, PDFImage>();
@@ -279,76 +518,170 @@ export async function writePDF(
         }
         images.set(operation, image);
       }
-    }
-    for (const slice of slices) {
-      throwIfAborted(options.signal);
-      // Clip every primitive to the same source interval; tall backgrounds may span pages.
-      const page = pdf.addPage([geometry.width * PX_TO_PT, geometry.height * PX_TO_PT]);
-      page.pushOperators(
-        pushGraphicsState(),
-        rectangle(
-          geometry.margin.left * PX_TO_PT,
-          (geometry.height - geometry.margin.top - (slice.end - slice.start)) * PX_TO_PT,
-          (geometry.width - geometry.margin.left - geometry.margin.right) * PX_TO_PT,
-          (slice.end - slice.start) * PX_TO_PT,
-        ),
-        clip(),
-        endPath(),
-      );
-      for (const operation of snapshot.operations) {
-        // Skip off-page text entirely; clipping alone would leave duplicate extraction items.
-        const bounds = operation.bounds;
-        if (bounds.y >= slice.end - 0.01 || bounds.y + bounds.height <= slice.start + 0.01)
-          continue;
-        if (operation.kind === 'text') {
-          if (!operation.invisible || options.includeRasterText !== false) {
-            drawLine(page, operation, matchingFont(operation, faces), slice.start, geometry);
-          }
-          continue;
-        }
-        // Padding is transparent; page ownership retains the original browser border box.
-        const placement = operation.kind === 'raster' ? rasterPlacement(bounds) : bounds;
-        // Convert top-left DOM coordinates to bottom-left PDF coordinates only here.
-        const position = {
-          x: (geometry.margin.left + placement.x) * PX_TO_PT,
-          y:
-            (geometry.height -
-              geometry.margin.top -
-              (placement.y - slice.start) -
-              placement.height) *
-            PX_TO_PT,
-          width: placement.width * PX_TO_PT,
-          height: placement.height * PX_TO_PT,
-        };
-        if (operation.kind === 'box') {
-          // PDF strokes are centered; inset them to match the CSS outer border box.
-          const background = parseColor(operation.background);
-          // Border color remains explicit even when a fully transparent background is used.
-          const border = parseColor(operation.borderColor);
-          page.drawRectangle({ ...position, color: background.color, opacity: background.opacity });
-          if (operation.borderWidth > 0) {
-            // Native borders remain uniform solid strokes within the supported subset.
-            const inset = (operation.borderWidth * PX_TO_PT) / 2;
-            page.drawRectangle({
-              x: position.x + inset,
-              y: position.y + inset,
-              width: position.width - inset * 2,
-              height: position.height - inset * 2,
-              borderWidth: operation.borderWidth * PX_TO_PT,
-              borderColor: border.color,
-              borderOpacity: border.opacity,
-            });
-          }
-        } else {
-          page.drawImage(images.get(operation)!, position);
-        }
+      if (operation.kind === 'image' || operation.kind === 'raster') {
+        resourceCompleted += 1;
+        if (options.reportProgress)
+          await options.reportProgress({
+            stage: 'resources',
+            completed: resourceCompleted,
+            total: resourceTotal,
+          });
       }
-      page.pushOperators(popGraphicsState());
+    }
+    if (options.reportProgress)
+      await options.reportProgress({ stage: 'pages', completed: 0, total: slices.length });
+    for (const [pageIndex, slice] of slices.entries()) {
+      throwIfAborted(options.signal);
+      const page = pdf.addPage([geometry.width * PX_TO_PT, geometry.height * PX_TO_PT]);
+      const textResources: TextResources = { fonts: new Map(), opacity: new Map() };
+      /** Replay native paint inside one source-to-page interval without duplicating extraction. */
+      function paint(
+        /** Original operation references, so repeated images retain their embedded resources. */
+        operations: readonly PaintOperation[],
+        /** Source coordinate mapped to the area's top. */
+        start: number,
+        /** Physical page clip in CSS pixels, independent of source coordinates. */
+        area: Bounds,
+      ): void {
+        const placementGeometry = { ...geometry, margin: { ...geometry.margin, top: area.y } };
+        page.pushOperators(
+          pushGraphicsState(),
+          rectangle(
+            area.x * PX_TO_PT,
+            (geometry.height - area.y - area.height) * PX_TO_PT,
+            area.width * PX_TO_PT,
+            area.height * PX_TO_PT,
+          ),
+          clip(),
+          endPath(),
+        );
+        for (const operation of operations) {
+          // Skip off-page text entirely; clipping alone would leave duplicate extraction items.
+          const bounds = operation.bounds;
+          if (
+            bounds.y >= start + area.height / sourceScale - 0.01 ||
+            bounds.y + bounds.height <= start + 0.01
+          )
+            continue;
+          if (operation.kind === 'text') {
+            if (!operation.invisible || options.includeRasterText !== false) {
+              drawLine(
+                page,
+                operation,
+                matchingFont(operation, faces),
+                start,
+                placementGeometry,
+                textResources,
+                sourceScale,
+              );
+            }
+            continue;
+          }
+          // Padding is transparent; page ownership retains the original browser border box.
+          const placement = operation.kind === 'raster' ? rasterPlacement(bounds) : bounds;
+          // Convert top-left DOM coordinates to bottom-left PDF coordinates only here.
+          const position = {
+            x: (geometry.margin.left + placement.x * sourceScale) * PX_TO_PT,
+            y:
+              (geometry.height - area.y - (placement.y - start + placement.height) * sourceScale) *
+              PX_TO_PT,
+            width: placement.width * sourceScale * PX_TO_PT,
+            height: placement.height * sourceScale * PX_TO_PT,
+          };
+          if (operation.kind === 'box') {
+            // PDF strokes are centered; inset them to match the CSS outer border box.
+            const background = parseColor(operation.background);
+            // Border color remains explicit even when a fully transparent background is used.
+            const border = parseColor(operation.borderColor);
+            page.drawRectangle({
+              ...position,
+              color: background.color,
+              opacity: background.opacity,
+            });
+            if (operation.borderWidth > 0) {
+              // Native borders remain uniform solid strokes within the supported subset.
+              const inset = (operation.borderWidth * sourceScale * PX_TO_PT) / 2;
+              page.drawRectangle({
+                x: position.x + inset,
+                y: position.y + inset,
+                width: position.width - inset * 2,
+                height: position.height - inset * 2,
+                borderWidth: operation.borderWidth * sourceScale * PX_TO_PT,
+                borderColor: border.color,
+                borderOpacity: border.opacity,
+              });
+            }
+          } else if (operation.kind === 'border') {
+            // Shared collapsed edges are already resolved and paint once as native filled rectangles.
+            const color = parseColor(operation.color);
+            page.drawRectangle({ ...position, color: color.color, opacity: color.opacity });
+          } else {
+            page.drawImage(images.get(operation)!, position);
+          }
+        }
+        page.pushOperators(popGraphicsState());
+      }
+      const contentTop = geometry.margin.top + (options.header?.height ?? 0);
+      const repeatedHeight =
+        slice.headerHeight ?? (slice.header ? slice.header.bodyStart - slice.header.bounds.y : 0);
+      // Stream order follows the visual reading order, including selectable repeated text.
+      for (const line of pageLines[pageIndex]!.header) {
+        drawLine(page, line, matchingFont(line, faces), 0, geometry, textResources);
+      }
+      if (embeddedHeader) {
+        page.drawPage(embeddedHeader, {
+          x: geometry.margin.left * PX_TO_PT,
+          y: (geometry.height - geometry.margin.top - options.header!.height) * PX_TO_PT,
+          width: (geometry.width - geometry.margin.left - geometry.margin.right) * PX_TO_PT,
+          height: options.header!.height * PX_TO_PT,
+        });
+      }
+      if (slice.header) {
+        // Ancestor backgrounds are clipped to this table's width and cannot obscure source rows.
+        paint(slice.header.operations, slice.header.bounds.y, {
+          x: geometry.margin.left + slice.header.bounds.x * sourceScale,
+          y: contentTop,
+          width: slice.header.bounds.width * sourceScale,
+          height: repeatedHeight * sourceScale,
+        });
+      }
+      // The source interval moves down only on a table continuation page; its coordinates stay intact.
+      paint(snapshot.operations, slice.start, {
+        x: geometry.margin.left,
+        y: contentTop + repeatedHeight * sourceScale,
+        width: geometry.width - geometry.margin.left - geometry.margin.right,
+        height: (slice.end - slice.start) * sourceScale,
+      });
+      for (const line of pageLines[pageIndex]!.footer) {
+        drawLine(page, line, matchingFont(line, faces), 0, geometry, textResources);
+      }
+      if (embeddedFooter) {
+        page.drawPage(embeddedFooter, {
+          x: geometry.margin.left * PX_TO_PT,
+          y: geometry.margin.bottom * PX_TO_PT,
+          width: (geometry.width - geometry.margin.left - geometry.margin.right) * PX_TO_PT,
+          height: options.footer!.height * PX_TO_PT,
+        });
+      }
+      if (options.reportProgress)
+        await options.reportProgress({
+          stage: 'pages',
+          completed: pageIndex + 1,
+          total: slices.length,
+        });
     }
     throwIfAborted(options.signal);
+    if (options.reportProgress)
+      await options.reportProgress({ stage: 'saving', completed: 0, total: 1 });
+    for (const face of faces) {
+      await face.positioned.embedUnicode(pdf);
+      throwIfAborted(options.signal);
+    }
     // A fresh ArrayBuffer-backed copy is accepted by browser Blob definitions.
     const bytes = Uint8Array.from(await pdf.save());
     throwIfAborted(options.signal);
+    if (options.reportProgress)
+      await options.reportProgress({ stage: 'saving', completed: 1, total: 1 });
     return { bytes, slices };
   } catch (error) {
     throwIfAborted(options.signal);

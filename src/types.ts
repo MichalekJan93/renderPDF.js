@@ -20,13 +20,13 @@ export interface TextOperation {
   bounds: Bounds;
   /** Browser-resolved visible text for this line. */
   text: string;
-  /** Browser-measured words retain native origins without accumulating run-width drift. */
+  /** Browser-measured runs retain native origins without accumulating width drift. */
   runs: {
-    /** Word text, retaining ligatures and non-breaking spaces within each run. */
+    /** Text between collapsible spaces, retaining ligatures and non-breaking spaces. */
     text: string;
-    /** Horizontal word origin relative to the source root, in CSS pixels. */
+    /** Horizontal run origin relative to the source root, in CSS pixels. */
     x: number;
-    /** Browser-measured word advance width in CSS pixels. */
+    /** Browser-measured run advance width in CSS pixels. */
     width: number;
   }[];
   /** Baseline position relative to the root's top edge. */
@@ -39,6 +39,8 @@ export interface TextOperation {
   weight: number;
   /** Registered face style. */
   style: 'normal' | 'italic';
+  /** Disable OpenType kerning when the browser explicitly selects font-kerning: none. */
+  kerning?: boolean;
   /** Computed CSS rgb/rgba text color. */
   color: string;
   /** True for extraction-only text inside a raster subtree. */
@@ -57,6 +59,20 @@ export interface BoxOperation {
   borderColor: string;
   /** Uniform border width in CSS pixels. */
   borderWidth: number;
+}
+
+/** One disjoint solid fill belonging to a resolved collapsed table border. */
+export interface BorderOperation {
+  /** Discriminant for native filled-border dispatch. */
+  kind: 'border';
+  /** Actual positive painted rectangle, including the half-width outside its grid line. */
+  bounds: Bounds;
+  /** Browser-computed winning border color, including any alpha component. */
+  color: string;
+  /** Winning CSS border thickness before crossing rectangles are partitioned. */
+  width: number;
+  /** Grid direction retained independently of the final clipped fill rectangle. */
+  direction: 'horizontal' | 'vertical';
 }
 
 /** An explicitly isolated DOM subtree captured at its paint-order position. */
@@ -80,7 +96,24 @@ export interface ImageOperation {
 }
 
 /** A flattened, ordered experiment display list, not a general CSS paint tree. */
-export type PaintOperation = TextOperation | BoxOperation | RasterOperation | ImageOperation;
+export type PaintOperation =
+  | TextOperation
+  | BoxOperation
+  | BorderOperation
+  | RasterOperation
+  | ImageOperation;
+
+/** Native table header replayed above each continuation interval without changing source geometry. */
+export interface TableHeader {
+  /** Original THEAD border box in source CSS pixels. */
+  bounds: Bounds;
+  /** First visible body row top; the gap after THEAD belongs to every repeated header. */
+  bodyStart: number;
+  /** Last visible body row bottom, excluding any TFOOT. */
+  bodyEnd: number;
+  /** Original paint references, including ancestor boxes clipped to the header band by the writer. */
+  operations: PaintOperation[];
+}
 
 /** Immutable geometry metadata plus a bounded list of ordered paint operations. */
 export interface LayoutSnapshot {
@@ -98,4 +131,6 @@ export interface LayoutSnapshot {
   forcedBreaks?: number[];
   /** Preferred indivisible blocks; oversized preferences may relax with an explicit warning. */
   avoidBreakBounds?: Bounds[];
+  /** Explicitly requested native THEAD repetitions for nonoverlapping tables. */
+  tableHeaders?: TableHeader[];
 }

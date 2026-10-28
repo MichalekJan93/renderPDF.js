@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { paginate } from '../src/pagination';
-import type { Bounds, LayoutSnapshot, TextOperation } from '../src/types';
+import type { Bounds, LayoutSnapshot, TableHeader, TextOperation } from '../src/types';
 import type { RenderWarning } from '../src/diagnostics';
 
 /** Construct a measured atomic text interval for coordinate-partition checks. */
@@ -41,6 +41,44 @@ function blockAt(
   height: number,
 ): Bounds {
   return { x: 0, y, width: 100, height };
+}
+
+/** Construct a native header and atomic body rows without relying on a browser layout algorithm. */
+function tableSource(
+  /** Original THEAD top; preceding source content can force the table onto another page. */
+  top: number,
+  /** Header band height, including any spacing before the first body row. */
+  headerHeight: number,
+  /** Positive browser-measured row heights in their original source order. */
+  rowHeights: readonly number[],
+  /** Content after the final body row, such as a footer or another document section. */
+  trailingHeight = 0,
+): { snapshot: LayoutSnapshot; header: TableHeader } {
+  // Original header text stays in the main paint list; continuations reference it without cloning.
+  const heading = textAt(top, headerHeight);
+  const rows: Bounds[] = [];
+  let position = top + headerHeight;
+  for (const height of rowHeights) {
+    rows.push(blockAt(position, height));
+    position += height;
+  }
+  const header: TableHeader = {
+    bounds: blockAt(top, headerHeight),
+    bodyStart: top + headerHeight,
+    bodyEnd: position,
+    operations: [heading],
+  };
+  return {
+    snapshot: {
+      width: 100,
+      height: position + trailingHeight,
+      operations: [heading],
+      warnings: [],
+      atomicBounds: rows,
+      tableHeaders: [header],
+    },
+    header,
+  };
 }
 
 describe('shared page/source coordinate mapping', () => {
@@ -234,5 +272,149 @@ describe('shared page/source coordinate mapping', () => {
     }
     snapshot.avoidBreakBounds = [blockAt(230, 20)];
     expect(() => paginate(snapshot, 100)).toThrow('within the source');
+  });
+});
+
+describe('repeated native table header pagination', () => {
+  it('reserves header height on every continuation without changing consecutive source intervals', () => {
+    // The first page fits two rows; later pages reserve the same twenty-pixel header before rows.
+    const { snapshot, header } = tableSource(0, 20, [30, 30, 30, 30, 30]);
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 80 },
+      { start: 80, end: 140, header, headerHeight: 20 },
+      { start: 140, end: 170, header, headerHeight: 20 },
+    ]);
+  });
+
+  it('keeps the original header with at least the first complete body row', () => {
+    // Only thirty pixels remain before the first natural cut, too little for header plus first row.
+    const { snapshot, header } = tableSource(70, 20, [30, 30, 30]);
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 70 },
+      { start: 70, end: 150 },
+      { start: 150, end: 180, header, headerHeight: 20 },
+    ]);
+  });
+
+  it('includes the gap between THEAD and the first body row in the repeated height', () => {
+    // Five pixels of inter-group spacing consume capacity even though the header's box is shorter.
+    const { snapshot, header } = tableSource(0, 25, [30, 30, 30, 30, 30]);
+    header.bounds.height = 20;
+    snapshot.operations[0]!.bounds.height = 20;
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 85 },
+      { start: 85, end: 145, header, headerHeight: 25 },
+      { start: 145, end: 175, header, headerHeight: 25 },
+    ]);
+  });
+
+  it('counts inter-row border spacing only once when a repeated header and row fit exactly', () => {
+    // Two source pixels precede the next row, so the repeated header reserves twenty rather than twenty-two.
+    const { snapshot, header } = tableSource(0, 20, [78, 78]);
+    header.bodyStart = 22;
+    header.bodyEnd = 180;
+    snapshot.height = 180;
+    snapshot.atomicBounds = [blockAt(22, 78), blockAt(102, 78)];
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 100 },
+      { start: 100, end: 180, header, headerHeight: 20 },
+    ]);
+  });
+
+  it('keeps body-only rowspans and the first header in one complete atomic cluster', () => {
+    // A cell joins the first two rows; neither the span nor the original heading may be orphaned.
+    const { snapshot, header } = tableSource(40, 20, [30, 30, 30, 30]);
+    snapshot.atomicBounds!.push(blockAt(60, 60));
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 40 },
+      { start: 40, end: 120 },
+      { start: 120, end: 180, header, headerHeight: 20 },
+    ]);
+  });
+
+  it('honors forced body-row boundaries while preserving continuation capacity', () => {
+    // A forced break after the first row still reserves header space on each following page.
+    const { snapshot, header } = tableSource(0, 20, [30, 30, 30, 30, 30]);
+    snapshot.forcedBreaks = [50];
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 50 },
+      { start: 50, end: 110, header, headerHeight: 20 },
+      { start: 110, end: 170, header, headerHeight: 20 },
+    ]);
+    // An explicit request to separate the original header from every body row is incompatible.
+    snapshot.forcedBreaks = [20];
+    expect(() => paginate(snapshot, 100)).toThrow('forced CSS');
+  });
+
+  it('stops repeating after the last body row, including pages starting with a table footer', () => {
+    // Body end is exclusive, so TFOOT or later document content never gains a stale THEAD.
+    const { snapshot, header } = tableSource(0, 20, [30, 30, 30, 30, 30], 50);
+    snapshot.forcedBreaks = [header.bodyEnd];
+    expect(paginate(snapshot, 100)).toEqual([
+      { start: 0, end: 80 },
+      { start: 80, end: 140, header, headerHeight: 20 },
+      { start: 140, end: 170, header, headerHeight: 20 },
+      { start: 170, end: 220 },
+    ]);
+  });
+
+  it('fails when a later atomic row cannot fit beside its repeated header', () => {
+    // Ninety pixels fit a bare page but exceed the eighty pixels left below a repeated THEAD.
+    const { snapshot } = tableSource(0, 20, [20, 90]);
+    expect(() => paginate(snapshot, 100)).toThrowError(
+      expect.objectContaining({
+        code: 'PAGINATION_FAILED',
+        message: expect.stringContaining('repeated table header'),
+      }),
+    );
+    // The original header plus its first row must fit even before any continuation exists.
+    expect(() => paginate(tableSource(0, 20, [90]).snapshot, 100)).toThrow('first atomic body row');
+  });
+
+  it('rejects body rowspan clusters that exceed the remaining continuation capacity', () => {
+    // Each row fits independently, but a spanning cell joins two later rows into one tall cluster.
+    const { snapshot } = tableSource(0, 20, [20, 45, 45]);
+    snapshot.atomicBounds!.push(blockAt(40, 90));
+    expect(() => paginate(snapshot, 100)).toThrowError(
+      expect.objectContaining({ code: 'PAGINATION_FAILED' }),
+    );
+  });
+
+  it('rejects an empty continuation caused by a body gap taller than its remaining capacity', () => {
+    // A continuation may not render a repeated heading alone while advancing through empty spacing.
+    const { snapshot, header } = tableSource(0, 20, [20]);
+    snapshot.height = 300;
+    header.bodyEnd = 300;
+    snapshot.atomicBounds!.push(blockAt(280, 20));
+    expect(() => paginate(snapshot, 100)).toThrow('complete atomic body row');
+  });
+
+  it('relaxes avoidance against the reduced continuation height without splitting rows', () => {
+    // The preference fits a bare page, but not a continuation with its twenty-pixel header.
+    const { snapshot, header } = tableSource(
+      0,
+      20,
+      Array.from({ length: 11 }, () => 20),
+    );
+    snapshot.avoidBreakBounds = [blockAt(100, 100)];
+    const warnings: RenderWarning[] = [];
+    expect(paginate(snapshot, 100, (warning) => warnings.push(warning))).toEqual([
+      { start: 0, end: 100 },
+      { start: 100, end: 180, header, headerHeight: 20 },
+      { start: 180, end: 240, header, headerHeight: 20 },
+    ]);
+    expect(warnings).toEqual([expect.objectContaining({ code: 'BREAK_AVOID_RELAXED' })]);
+  });
+
+  it('rejects overlapping continuation tables and invalid header metadata explicitly', () => {
+    // Side-by-side tables cannot share the single repeated band reserved for a continuation page.
+    const { snapshot, header } = tableSource(0, 20, [30, 30, 30]);
+    snapshot.tableHeaders = [header, { ...header, bounds: { ...header.bounds, x: 50 } }];
+    expect(() => paginate(snapshot, 100)).toThrow('must not overlap');
+    snapshot.tableHeaders = [{ ...header, bodyStart: Number.NaN }];
+    expect(() => paginate(snapshot, 100)).toThrow('finite body row bounds');
+    snapshot.tableHeaders = [header];
+    snapshot.atomicBounds = [];
+    expect(() => paginate(snapshot, 100)).toThrow('atomic first body row');
   });
 });

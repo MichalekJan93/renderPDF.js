@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Typography regression fixture</title>
+    <style>
+      body {
+        margin: 0;
+        background: white;
+      }
+      #source {
+        width: 720px;
+        padding-bottom: 4px;
+        font-family: 'Typography Sans';
+        font-size: 18px;
+        line-height: 1.4;
+        color: #182334;
+      }
+      p {
+        margin: 0 0 14px;
+      }
+      .sample {
+        display: block;
+      }
+      .serif {
+        font-family: 'Typography Serif';
+      }
+      .kerning {
+        font-size: 31.5px;
+      }
+      .ligatures {
+        font-size: 23.25px;
+      }
+      .bold {
+        font-size: 18.5px;
+        font-weight: 700;
+      }
+      .semibold {
+        font-size: 18.5px;
+        font-weight: 600;
+      }
+      .italic {
+        font-size: 22.75px;
+        font-style: italic;
+      }
+      #mixed {
+        width: 485px;
+        font-size: 17.25px;
+        line-height: 1.7;
+      }
+      #first-page {
+        height: 620px;
+      }
+      #sans-no-kerning {
+        font-kerning: none;
+      }
+      #small-auto {
+        font-size: 12px;
+      }
+      #small-normal {
+        font-size: 14px;
+        font-kerning: normal;
+      }
+      #second-page {
+        break-before: page;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Unicode regression samples retain authored glyphs through numeric references. -->
+    <main id="source">
+      <section id="first-page">
+        <p class="sample kerning" id="sans-kerning">AVATAR To WA VAVAV Ty</p>
+        <p class="sample kerning" id="sans-no-kerning">AVATAR To WA VAVAV Ty</p>
+        <p class="sample" id="small-auto">AVATAR To WA office affinity ffi</p>
+        <p class="sample" id="small-normal">AVATAR To WA office affinity ffi</p>
+        <p class="sample ligatures" id="sans-ligatures">office affinity ffi final efficient</p>
+        <p class="sample serif kerning" id="serif-kerning">AVATAR To WA VAVAV Ty</p>
+        <p class="sample serif ligatures" id="serif-ligatures">
+          office affinity ffi final efficient
+        </p>
+        <p class="sample serif" id="combining">
+          Pa&#x301;ni, ku&#x30a;n&#x30c; a z&#x30c;lut&#x30c;ouc&#x30c;ky&#x301; text.
+        </p>
+        <p class="sample bold" id="bold-czech">
+          P&#x159;&#xed;li&#x161; &#x17e;lu&#x165;ou&#x10d;k&#xfd; k&#x16f;&#x148; &#xfa;p&#x11b;l
+          &#x10f;&#xe1;belsk&#xe9; &#xf3;dy.
+        </p>
+        <p class="sample semibold" id="semibold-czech">
+          &#x160;estistovka pou&#x17e;&#xed;v&#xe1; nejbli&#x17e;&#x161;&#xed; registrovan&#xfd;
+          &#x159;ez.
+        </p>
+        <p class="sample italic" id="italic-czech">
+          Kurz&#xed;va: P&#x159;&#xed;li&#x161; &#x17e;lu&#x165;ou&#x10d;k&#xfd; k&#x16f;&#x148;.
+        </p>
+        <p class="sample" id="mixed">
+          Sm&#xed;&#x161;en&#xfd; &#x159;&#xe1;dek:
+          <span class="serif">AVATAR office affinity</span> a
+          <strong>tu&#x10d;n&#xfd; &#x10d;esk&#xfd; text</strong> mus&#xed; zachovat
+          zalamov&#xe1;n&#xed;, <em>kurz&#xed;vu a koncovou pozici</em> ka&#x17e;d&#xe9;ho slova.
+        </p>
+      </section>
+      <section id="second-page">
+        <p class="sample serif ligatures" id="page-two">
+          Druh&#xe1; str&#xe1;nka: office ffi &#x17e;lu&#x165;ou&#x10d;k&#xfd;.
+        </p>
+      </section>
+    </main>
+    <script type="module">
+      import { registerFont, renderPDF } from '/src/index.ts';
+
+      // Each exact program controls both the source DOM and the generated PDF.
+      const definitions = [
+        ['Typography Sans', 'NotoSans-Regular.ttf', 400, 'normal'],
+        ['Typography Sans', 'NotoSans-Bold.ttf', 700, 'normal'],
+        ['Typography Sans', 'NotoSans-Italic.ttf', 400, 'italic'],
+        ['Typography Serif', 'NotoSerif-Regular.ttf', 400, 'normal'],
+      ];
+      const fonts = await Promise.all(
+        definitions.map(async ([family, filename, weight, style]) => {
+          const response = await fetch(`/fonts/${filename}`);
+          if (!response.ok) throw new Error(`Missing typography fixture font: ${filename}`);
+          return registerFont({ family, data: await response.arrayBuffer(), weight, style });
+        }),
+      );
+      await document.fonts.ready;
+      // Tests exercise the public renderer, rather than the internal experiment writer.
+      window.typography = {
+        export: () => renderPDF(document.querySelector('#source'), { fonts, margin: 24 }),
+      };
+    </script>
+  </body>
+</html>

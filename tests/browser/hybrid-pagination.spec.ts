@@ -520,15 +520,47 @@ test('default CSS omission preserves content while strictCss rejects unsupported
     } catch (error) {
       strictError = error instanceof api.RenderPDFError ? error.code : String(error);
     }
+    // HTML page bands must inherit the same decorative-CSS policy as the main source.
+    const bandBody = document.createElement('main');
+    const band = document.createElement('div');
+    bandBody.style.cssText = band.style.cssText = 'font: 14px "Hybrid Sans"; width: 400px';
+    bandBody.textContent = 'Native body with an HTML header.';
+    band.textContent = 'Selectable HTML header.';
+    band.style.boxShadow = '0 4px 8px #345';
+    document.body.append(bandBody, band);
+    const bandMarkup = band.outerHTML;
+    const bandOptions = {
+      fonts,
+      format: 'A4' as const,
+      margin: 24,
+      header: { kind: 'html' as const, element: band, height: 40 },
+    };
+    const bandResult = await api.renderPDF(bandBody, bandOptions);
+    let bandStrictError = 'NO_ERROR';
+    try {
+      await api.renderPDF(bandBody, { ...bandOptions, strictCss: true });
+    } catch (error) {
+      bandStrictError = error instanceof api.RenderPDFError ? error.code : String(error);
+    }
     return {
       bytes: Array.from(await result.toUint8Array()),
+      bandBytes: Array.from(await bandResult.toUint8Array()),
+      bandUnchanged: band.outerHTML === bandMarkup,
+      bandStrictError,
       markup,
       unchanged: root.innerHTML === markup,
       strictError,
     };
   });
   expect(evidence.unchanged).toBe(true);
+  expect(evidence.bandUnchanged).toBe(true);
   expect(evidence.strictError).toBe('UNSUPPORTED_CSS');
+  expect(evidence.bandStrictError).toBe('UNSUPPORTED_CSS');
+  const bandPages = await inspect(page, evidence.bandBytes);
+  expect(bandPages).toHaveLength(1);
+  const bandText = bandPages[0]!.text.map((item) => item.text).join('');
+  expect(bandText).toContain('Selectable HTML header.');
+  expect(bandText).toContain('Native body with an HTML header.');
   const pages = await inspect(page, evidence.bytes);
   expect(pages).toHaveLength(1);
   expect(pages[0]!.imagePaints).toBe(1);

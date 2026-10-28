@@ -24,6 +24,8 @@ export function validatePackageManifest(manifest: unknown): readonly string[] {
   const requiredPaths = new Set([
     'package.json',
     'README.md',
+    'CHANGELOG.md',
+    'API.md',
     'LICENSE',
     'assets/renderpdf-logo.png',
     'dist/index.js',

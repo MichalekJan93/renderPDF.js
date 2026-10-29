@@ -45,8 +45,8 @@ npm install renderpdf-js
 
 For browser applications, use an ESM bundler such as Vite.
 The [playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playground)
-provides HTML upload/editing, a preview and timed RenderPDF.js/jsPDF exports
-with output-size and page-count comparisons from a source checkout.
+provides HTML upload/editing, JSON options, a live preview, export diagnostics
+and timed RenderPDF.js/jsPDF comparisons from a source checkout.
 
 ## Create a document
 

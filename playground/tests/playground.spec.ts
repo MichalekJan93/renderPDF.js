@@ -1,4 +1,4 @@
-import { expect, test, type Download } from '@playwright/test';
+import { expect, test, type Download, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
@@ -15,6 +15,20 @@ function withSampleFont(
   html: string,
 ): string {
   return `<style>body { font-family: 'Playground Sans'; }</style>${html}`;
+}
+
+/** Edit the public JSON settings as a user would, preserving all other displayed defaults. */
+async function setOptions(
+  /** Browser page containing the live playground editor. */
+  page: Page,
+  /** Public RenderPDF.js option values to override in the JSON object. */
+  changes: Record<string, unknown>,
+): Promise<void> {
+  // The textarea always contains a complete JSON object after initialization.
+  const editor = page.locator('#options-input');
+  const current = JSON.parse(await editor.inputValue()) as Record<string, unknown>;
+  await editor.fill(JSON.stringify({ ...current, ...changes }, null, 2));
+  await expect(page.locator('#options-error')).toBeHidden();
 }
 
 /** Independently inspect the actual download without importing the converter source.
@@ -83,6 +97,131 @@ async function inspectPdf(
     await loadingTask.destroy();
   }
 }
+
+// The public shell must expose the requested workflow and validate settings before conversion.
+test('playground layout, default JSON and option errors lead to an actual margin export', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  // The branded image is loaded and the badge overlaps its lower-right corner.
+  const logo = page.locator('#brand-logo');
+  const badge = page.locator('.playground-badge');
+  await expect(badge).toHaveText('Playground');
+  expect(await logo.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  const logoBox = (await logo.boundingBox())!;
+  const badgeBox = (await badge.boundingBox())!;
+  expect(badgeBox.x).toBeGreaterThan(logoBox.x + logoBox.width / 2);
+  expect(badgeBox.y).toBeLessThan(logoBox.y + logoBox.height);
+  expect(badgeBox.y + badgeBox.height).toBeGreaterThan(logoBox.y + logoBox.height);
+  await expect(page.locator('.introduction')).toContainText('browser-rendered HTML');
+  await expect(page.locator('.limitations-note')).toContainText('Current limits');
+
+  // The long bundled directory keeps the right preview taller than the left-side controls.
+  await expect(page.locator('#preview-host tbody tr')).toHaveCount(200);
+  // The export and messages belong to the input column rather than waiting for the preview bottom.
+  const inputColumn = page.locator('.workspace > .input-column');
+  await expect(inputColumn).toHaveCount(1);
+  await expect(inputColumn.locator(':scope > .editor-panel')).toHaveCount(1);
+  await expect(inputColumn.locator(':scope > .output-section')).toHaveCount(1);
+  await expect(page.locator('.workspace > .preview-panel')).toHaveCount(1);
+  const inputColumnBox = (await inputColumn.boundingBox())!;
+  const editorBox = (await page.locator('.editor-panel').boundingBox())!;
+  const previewBox = (await page.locator('.preview-panel').boundingBox())!;
+  const outputBox = (await page.locator('.output-section').boundingBox())!;
+  const resultsBox = (await page.locator('.result-panel').boundingBox())!;
+  const diagnosticsBox = (await page.locator('.diagnostics-panel').boundingBox())!;
+  expect(inputColumnBox.x + inputColumnBox.width).toBeLessThan(previewBox.x);
+  expect(previewBox.height).toBeGreaterThan(editorBox.height);
+  expect(outputBox.y).toBeGreaterThan(editorBox.y + editorBox.height);
+  expect(outputBox.y - (editorBox.y + editorBox.height)).toBeLessThan(100);
+  expect(outputBox.y).toBeLessThan(previewBox.y + previewBox.height);
+  expect(resultsBox.x).toBeGreaterThanOrEqual(inputColumnBox.x);
+  expect(resultsBox.x + resultsBox.width).toBeLessThanOrEqual(
+    inputColumnBox.x + inputColumnBox.width,
+  );
+  expect(diagnosticsBox.x).toBeGreaterThanOrEqual(inputColumnBox.x);
+  expect(diagnosticsBox.x + diagnosticsBox.width).toBeLessThanOrEqual(
+    inputColumnBox.x + inputColumnBox.width,
+  );
+  const htmlBox = (await page.locator('#html-input').boundingBox())!;
+  const optionsBox = (await page.locator('#options-input').boundingBox())!;
+  const importBox = (await page.locator('#html-file').boundingBox())!;
+  const exampleBox = (await page.locator('#example-select').boundingBox())!;
+  expect(optionsBox.y).toBeGreaterThan(htmlBox.y + htmlBox.height);
+  expect(importBox.x + importBox.width).toBeLessThan(exampleBox.x);
+
+  // Every documented JSON property is prefilled, including null markers for browser-owned values.
+  const optionsInput = page.locator('#options-input');
+  const defaultOptions = JSON.parse(await optionsInput.inputValue()) as Record<string, unknown>;
+  expect(Object.keys(defaultOptions).sort()).toEqual(
+    [
+      'format',
+      'orientation',
+      'margin',
+      'fit',
+      'fonts',
+      'fontMismatch',
+      'fontFallback',
+      'rasterScale',
+      'fallback',
+      'strictCss',
+      'verifySource',
+      'pageBreak',
+      'repeatTableHeaders',
+      'header',
+      'footer',
+      'metadata',
+      'signal',
+      'onWarning',
+      'onProgress',
+    ].sort(),
+  );
+  expect(defaultOptions).toMatchObject({
+    format: 'A4',
+    orientation: 'portrait',
+    margin: 24,
+    fit: 'none',
+    fonts: null,
+    fontMismatch: null,
+    fontFallback: null,
+    rasterScale: 2,
+    fallback: 'auto',
+    strictCss: false,
+    verifySource: 'full',
+    pageBreak: 'css',
+    repeatTableHeaders: false,
+    header: null,
+    footer: null,
+    metadata: { title: 'RenderPDF.js', author: null, subject: null, keywords: null },
+    signal: null,
+    onWarning: null,
+    onProgress: null,
+  });
+  await optionsInput.fill('{ "format":');
+  await expect(page.locator('#options-error')).toContainText('valid JSON');
+  await expect(page.locator('#errors')).toContainText('Options:');
+  await expect(page.locator('#export-pdfs')).toBeDisabled();
+  await expect(page.locator('#results')).toBeHidden();
+
+  // A repaired JSON value must reach RenderPDF.js and move real PDF text to a 16px margin.
+  await optionsInput.fill(JSON.stringify({ ...defaultOptions, margin: 16 }, null, 2));
+  await page.locator('#html-input').fill(withSampleFont('<p>Margin option sample.</p>'));
+  await expect(page.locator('#options-error')).toBeHidden();
+  await expect(page.locator('#errors')).toBeHidden();
+  await expect(page.locator('#export-pdfs')).toBeEnabled();
+  const downloadPromise = page.waitForEvent('download', {
+    predicate: (download) => download.suggestedFilename() === 'renderpdf.pdf',
+  });
+  await page.locator('#export-pdfs').click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  const download = await downloadPromise;
+  const path = testInfo.outputPath('json-margin-renderpdf.pdf');
+  await download.saveAs(path);
+  const evidence = await inspectPdf(await readFile(path));
+  expect(compact(evidence.texts.join(''))).toBe('Marginoptionsample.');
+  // Source padding is 8 CSS px, so 16 + 8 CSS px maps to 18 PDF points.
+  expect(evidence.firstTextX).toBeCloseTo(18, 0);
+});
 
 // The browser and output directory are Playwright-owned resources for the full consumer flow.
 test('fresh full HTML compares two downloads while preserving RenderPDF.js text and local raster', async ({
@@ -230,7 +369,7 @@ test('example selector loads and resets each authored source', async ({ page }, 
   const preview = page.locator('#preview-host').locator('[data-preview-body]');
   const exportButton = page.locator('#export-pdfs');
   const results = page.locator('#results');
-  await expect(select.locator('option')).toHaveText([/Example 1/, /Example 2/]);
+  await expect(select.locator('option')).toHaveText(['People directory', 'Product catalog']);
   await expect(select).toHaveValue('example-1');
   await expect(input).toHaveValue(/Global User Directory/);
   await expect(preview.locator('h1')).toContainText('User Profiles & Global Statistics');
@@ -256,7 +395,9 @@ test('example selector loads and resets each authored source', async ({ page }, 
 
   // Times stays in the authored CSS; no matching font is uploaded or passed to RenderPDF.js.
   await expect(exportButton).toBeEnabled();
-  await expect(page.locator('#font-mismatch')).toHaveValue('fallback');
+  expect(JSON.parse(await page.locator('#options-input').inputValue())).toMatchObject({
+    fontMismatch: null,
+  });
   await expect(page.locator('#font-requirements')).toContainText('Times New Roman');
   await expect(page.locator('#registered-fonts')).not.toContainText('Times New Roman');
   await expect(page.locator('#status')).toContainText('report any font substitutions');
@@ -283,11 +424,12 @@ test('example selector loads and resets each authored source', async ({ page }, 
   expect(actualNames).toEqual(expectedNames);
 
   // The same no-font source is rejected when the public mismatch option requires exact faces.
-  await page.locator('#font-mismatch').selectOption('error');
+  await setOptions(page, { fontMismatch: 'error' });
   await expect(exportButton).toBeEnabled();
   await exportButton.click();
   await expect(page.locator('#render-result')).toContainText('Error');
   await expect(page.locator('#render-result')).toContainText('Times New Roman');
+  await expect(page.locator('#errors')).toContainText('Times New Roman');
 
   await select.selectOption('example-1');
   await expect(input).toHaveValue(/Global User Directory/);
@@ -318,11 +460,13 @@ test('font mismatch can fail RenderPDF.js, then exact uploaded faces remove the 
   await expect(page.locator('#font-requirements')).toContainText('Fixture Face · 400 normal');
   await expect(page.locator('#font-requirements')).toContainText('Fixture Face · 700 normal');
   await expect(exportButton).toBeEnabled();
-  await page.locator('#font-mismatch').selectOption('error');
+  await setOptions(page, { fontMismatch: 'error' });
   await exportButton.click();
   await expect(page.locator('#render-result')).toContainText('Error');
   await expect(page.locator('#render-result')).toContainText('Fixture Face');
+  await expect(page.locator('#errors')).toContainText('Fixture Face');
   await expect(page.locator('#jspdf-result')).toContainText('Done');
+  await page.locator('.advanced-panel summary').click();
   const fontFile = page.locator('#font-file');
   for (const face of [
     { file: 'Regular', weight: 400 },
@@ -370,6 +514,12 @@ test('font mismatch can fail RenderPDF.js, then exact uploaded faces remove the 
   }
   await expect(page.locator('#render-result')).toContainText('Done');
   await expect(page.locator('#jspdf-result')).toContainText('Done');
+  // An uploaded family can also be selected as a substitute when the source never names it.
+  await input.fill('<style>body{font-family:"Unregistered Face"}</style><p>Fallback sample.</p>');
+  await setOptions(page, { fontMismatch: 'fallback', fontFallback: 'Fixture Face' });
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#warnings')).toContainText('FONT_SUBSTITUTED');
 });
 
 // A text-free document needs no matching CSS face; the app can pass its minimal base handle.
@@ -394,14 +544,17 @@ test('stage profiling is opt-in and accounts for the measured RenderPDF.js total
   // The short synthetic document keeps this check about measurement, not renderer throughput.
   const input = page.locator('#html-input');
   const profile = page.locator('#profile-stages');
-  const verification = page.locator('#source-verification');
   const details = page.locator('#render-profile');
   const exportButton = page.locator('#export-pdfs');
+  await page.locator('.advanced-panel summary').click();
   await expect(profile).not.toBeChecked();
-  await expect(verification).toHaveValue('mutations');
+  expect(JSON.parse(await page.locator('#options-input').inputValue())).toMatchObject({
+    verifySource: 'full',
+  });
   await expect(details).toBeHidden();
   await input.fill(withSampleFont('<p>Profiled Unicode sample: &#269;.</p>'));
   await profile.check();
+  await setOptions(page, { verifySource: 'mutations' });
   await exportButton.click();
   await expect(page.locator('#render-result')).toContainText('Done');
   await expect(page.locator('#jspdf-result')).toContainText('Done');
@@ -437,7 +590,7 @@ test('stage profiling is opt-in and accounts for the measured RenderPDF.js total
   await expect(page.locator('#jspdf-result')).toContainText('Done');
   await expect(details).toBeHidden();
   // Full mode restores the stronger guard and clears the reduced-verification diagnostic.
-  await verification.selectOption('full');
+  await setOptions(page, { verifySource: 'full' });
   await expect(page.locator('#results')).toBeHidden();
   await exportButton.click();
   await expect(page.locator('#render-result')).toContainText('Done');
@@ -538,22 +691,25 @@ test('uploaded HTML becomes the preview and produces both measured PDFs', async 
   await expect(page.locator('#export-pdfs')).toBeEnabled();
 });
 
-// The comparison UI exposes the library's optional CSS rejection policy.
-test('CSS checkbox switches between a completed export and strict rejection', async ({ page }) => {
+// The JSON editor passes the library's optional CSS rejection policy to the actual exporter.
+test('strict CSS JSON option switches between a completed export and rejection', async ({
+  page,
+}) => {
   await page.goto('/', { waitUntil: 'networkidle' });
   await page
     .locator('#html-input')
     .fill(withSampleFont('<p style="box-shadow: 0 3px 6px #345">Shadow.</p>'));
   await page.locator('#export-pdfs').click();
   await expect(page.locator('#render-result')).toContainText('Done');
-  await page.locator('#strict-css').check();
+  await setOptions(page, { strictCss: true });
   await page.locator('#export-pdfs').click();
   await expect(page.locator('#render-result')).toContainText('Error');
   await expect(page.locator('#render-result')).toContainText('outer shadows');
+  await expect(page.locator('#errors')).toContainText('outer shadows');
 });
 
 // Authored forced breaks can be ignored explicitly without changing or losing source text.
-test('page-break checkbox fills the first page when authored breaks are disabled', async ({
+test('page-break JSON option fills the first page when authored breaks are disabled', async ({
   page,
 }, testInfo) => {
   await page.goto('/', { waitUntil: 'networkidle' });
@@ -566,10 +722,11 @@ test('page-break checkbox fills the first page when authored breaks are disabled
     <p>The content continues.</p>`),
   );
   // Default CSS mode must remain available for documents that deliberately start a new chapter.
-  const respectPageBreaks = page.locator('#respect-page-breaks');
-  await expect(respectPageBreaks).toBeChecked();
+  expect(JSON.parse(await page.locator('#options-input').inputValue())).toMatchObject({
+    pageBreak: 'css',
+  });
   for (const respect of [true, false]) {
-    await respectPageBreaks.setChecked(respect);
+    await setOptions(page, { pageBreak: respect ? 'css' : 'auto' });
     // Filter the real browser event so the subsequent jsPDF download cannot replace this evidence.
     const downloadPromise = page.waitForEvent('download', {
       predicate: (download) => download.suggestedFilename() === 'renderpdf.pdf',

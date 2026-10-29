@@ -2,10 +2,11 @@ import { jsPDF, type HTMLFontFace } from 'jspdf';
 import {
   renderPDF,
   type RegisteredFont,
+  type RenderPDFOptions,
   type RenderProgress,
   type RenderStage,
 } from 'renderpdf-js';
-import { contentWidthPx, previewFamily } from './preview';
+import { contentWidthPx } from './preview';
 
 // Registered handles own immutable bytes; avoid converting the same TTF on later comparisons.
 const jsPdfFontData = new WeakMap<RegisteredFont, string>();
@@ -83,14 +84,8 @@ export async function measureRenderPdf(
   source: HTMLElement,
   /** Exact source faces only; an empty collection lets RenderPDF.js load its base font. */
   fonts: readonly RegisteredFont[],
-  /** Report a base-font substitution or reject an unmatched CSS face. */
-  fontMismatch: 'error' | 'fallback',
-  /** Fail on unsupported decorative CSS when explicitly requested. */
-  strictCss: boolean,
-  /** Honor authored CSS page breaks or fill pages from measured content alone. */
-  pageBreak: 'css' | 'auto',
-  /** Choose the library's documented source-stability guard for this export. */
-  verifySource: 'mutations' | 'full',
+  /** Validated JSON settings from the playground options editor. */
+  options: RenderPDFOptions,
   /** Collect optional stage timings; off for the regular comparison. */
   profileStages = false,
 ): Promise<ExportMeasurement> {
@@ -100,16 +95,9 @@ export async function measureRenderPdf(
   // Serialization is included; the download action is excluded for both libraries.
   const startedAtMs = performance.now();
   const result = await renderPDF(source, {
+    ...options,
     // Omit the option entirely for documents such as Example 2 with no exact face.
     ...(fonts.length > 0 ? { fonts } : {}),
-    fontMismatch,
-    // Exact uploaded-only documents have no bundled face to name as their fallback.
-    ...(fonts.some((font) => font.family === previewFamily) ? { fontFallback: previewFamily } : {}),
-    format: 'A4',
-    margin: 24,
-    strictCss,
-    pageBreak,
-    verifySource,
     ...(profileStages
       ? {
           onProgress(progress: RenderProgress): void {

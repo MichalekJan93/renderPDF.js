@@ -5,248 +5,269 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5180; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5180; base-uri 'none'; form-action 'none'"
     />
     <meta
       name="description"
-      content="Local HTML-to-PDF export comparison with RenderPDF.js and jsPDF."
+      content="Preview static HTML and compare local PDF exports from RenderPDF.js and jsPDF."
     />
     <link rel="icon" href="data:," />
-    <title>RenderPDF.js vs jsPDF · HTML to PDF</title>
+    <title>RenderPDF.js Playground</title>
   </head>
   <body>
     <div class="app-shell">
       <header class="app-header">
-        <p class="eyebrow">RenderPDF.js / jsPDF</p>
-        <h1>Compare HTML-to-PDF exports</h1>
+        <div class="brand-lockup">
+          <img id="brand-logo" alt="RenderPDF.js" />
+          <h1 class="playground-badge">Playground</h1>
+        </div>
         <p class="introduction">
-          Upload HTML, inspect the preview, and download PDFs from both libraries with one click.
-          Compare conversion time and file size. Your document is processed locally in the browser.
+          Explore how RenderPDF.js turns browser-rendered HTML into a PDF. Import or paste a
+          document, inspect the live preview, then export it alongside a jsPDF comparison.
+          Everything runs in your browser.
         </p>
+        <div class="limitations-note" role="note">
+          <strong>Current limits</strong>
+          <p>
+            Use static HTML and CSS with inline PNG or JPEG images. Scripts and external resources
+            are unsupported. RenderPDF.js supports an experimental subset of CSS and pagination;
+            unsupported input may stop an export. The jsPDF comparison stays at A4 with 24 CSS px
+            margins even when you edit RenderPDF.js options.
+          </p>
+        </div>
       </header>
 
-      <main class="workspace">
-        <section class="editor-panel" aria-labelledby="editor-title">
-          <div class="panel-heading">
-            <div>
-              <p class="step-label">01 / Input</p>
-              <h2 id="editor-title">Your document</h2>
-            </div>
-            <button id="reset-example" class="button-secondary" type="button">Load example</button>
-          </div>
+      <main>
+        <div class="workspace">
+          <div class="input-column">
+            <section class="editor-panel" aria-labelledby="editor-title">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="editor-title">HTML and options</h2>
+                </div>
+              </div>
+              <div class="source-row">
+                <div class="source-field">
+                  <label for="html-file">Import HTML</label>
+                  <input
+                    id="html-file"
+                    type="file"
+                    accept=".html,.htm,text/html"
+                    aria-describedby="file-help"
+                  />
+                  <p id="file-help" class="field-help">UTF-8 .html or .htm, up to 10 MiB.</p>
+                </div>
+                <div class="source-field">
+                  <label for="example-select">Example</label>
+                  <div class="example-control">
+                    <select id="example-select" aria-describedby="example-help">
+                      <option value="example-1">People directory</option>
+                      <option value="example-2">Product catalog</option>
+                    </select>
+                    <button id="reset-example" class="button-secondary" type="button">
+                      Reload
+                    </button>
+                  </div>
+                  <p id="example-help" class="field-help">
+                    Select a sample or reload it after editing.
+                  </p>
+                </div>
+              </div>
 
-          <label for="example-select">Example document</label>
-          <select id="example-select" aria-describedby="example-help">
-            <option value="example-1">Example 1 · People directory</option>
-            <option value="example-2">Example 2 · Product catalog</option>
-          </select>
-          <p id="example-help" class="field-help">
-            Choosing an example replaces the editor and preview. Load example restores the selected
-            example after edits or an upload.
-          </p>
-
-          <label for="html-file">Upload an HTML file</label>
-          <input
-            id="html-file"
-            type="file"
-            accept=".html,.htm,text/html"
-            aria-describedby="file-help"
-          />
-          <p id="file-help" class="field-help">A UTF-8 .html or .htm file, up to 10 MiB.</p>
-          <label for="html-input">HTML document</label>
-          <p id="input-help" class="field-help">
-            You can also edit the loaded HTML or paste a complete static document with CSS. Scripts
-            and external resources are unsupported; embed PNG/JPEG images as data URLs. Unavailable
-            images are marked in the preview and block export until replaced.
-          </p>
-          <textarea
-            id="html-input"
-            aria-describedby="input-help"
-            spellcheck="false"
-            autocapitalize="off"
-            autocomplete="off"
-            placeholder="<h1>My document</h1>"
-          ></textarea>
-
-          <fieldset class="font-panel" aria-describedby="font-help">
-            <legend>Document font files</legend>
-            <p id="font-help" class="field-help">
-              Font files are optional. Register matching local TTF files to preserve the HTML font
-              in RenderPDF.js. Without a matching file, RenderPDF.js can use its base font and
-              report the substitution; the preview and PDF may then look different. Files stay in
-              this browser session.
-            </p>
-            <ul
-              id="font-requirements"
-              class="warnings"
-              aria-label="Document font availability"
-              hidden
-            ></ul>
-            <div class="font-fields">
-              <div>
-                <label for="font-family">CSS family</label>
-                <input
-                  id="font-family"
-                  type="text"
+              <div class="editor-field">
+                <label for="html-input">HTML</label>
+                <p id="input-help" class="field-help">
+                  Paste a static document or edit the imported HTML. Changes update the preview.
+                </p>
+                <textarea
+                  id="html-input"
+                  aria-describedby="input-help"
+                  spellcheck="false"
+                  autocapitalize="off"
                   autocomplete="off"
-                  placeholder="Times New Roman"
-                />
+                  placeholder="<h1>My document</h1>"
+                ></textarea>
               </div>
-              <div>
-                <label for="font-weight">Weight</label>
-                <input id="font-weight" type="number" min="100" max="900" step="100" value="400" />
+              <div class="editor-field options-field">
+                <label for="options-input">RenderPDF.js options</label>
+                <p id="options-help" class="field-help">
+                  Edit the JSON object to control the library. Default values are filled in; null
+                  means an option is omitted. Fonts and callbacks are managed by this playground.
+                </p>
+                <textarea
+                  id="options-input"
+                  aria-describedby="options-help options-error"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  autocomplete="off"
+                  placeholder='{"format": "A4"}'
+                ></textarea>
+                <p id="options-error" class="field-error" role="alert" hidden></p>
               </div>
-              <div>
-                <label for="font-style">Style</label>
-                <select id="font-style">
-                  <option value="normal">Normal</option>
-                  <option value="italic">Italic</option>
-                </select>
+              <div class="editor-actions">
+                <button id="refresh-preview" class="button-secondary" type="button">
+                  Update preview
+                </button>
               </div>
-            </div>
-            <label for="font-file">Matching TTF file</label>
-            <input id="font-file" type="file" accept=".ttf,font/ttf" />
-            <button id="register-font" class="button-secondary" type="button">Register font</button>
-            <p id="font-status" class="field-help" aria-live="polite"></p>
-            <ul id="registered-fonts" aria-label="Registered document fonts"></ul>
-          </fieldset>
-
-          <label for="font-mismatch">RenderPDF.js font mismatch</label>
-          <select id="font-mismatch" aria-describedby="font-mismatch-help">
-            <option value="fallback">Export with base font and report substitution</option>
-            <option value="error">Stop RenderPDF.js export with an error</option>
-          </select>
-          <p id="font-mismatch-help" class="field-help">
-            Applies when HTML requests a font without matching registered bytes. The RenderPDF.js
-            result reports FONT_SUBSTITUTED in fallback mode. jsPDF handles missing fonts
-            separately, so compare the downloaded PDFs as well as their times.
-          </p>
-
-          <label class="checkbox-label" for="strict-css">
-            <input id="strict-css" type="checkbox" />
-            Reject omitted CSS effects
-          </label>
-          <label class="checkbox-label" for="respect-page-breaks">
-            <input
-              id="respect-page-breaks"
-              type="checkbox"
-              checked
-              aria-describedby="page-break-help"
-            />
-            Respect HTML page breaks
-          </label>
-          <p id="page-break-help" class="field-help">
-            Applies to RenderPDF.js. Turn this off to ignore forced breaks and keep-together hints.
-            Pages fill the available space; table rows remain undivided.
-          </p>
-          <label for="source-verification">RenderPDF.js source verification</label>
-          <select id="source-verification" aria-describedby="verification-help">
-            <option value="mutations">Fast static HTML</option>
-            <option value="full">Full CSS guard</option>
-          </select>
-          <p id="verification-help" class="field-help">
-            Fast static HTML checks observed DOM and stylesheet mutations during export. It can miss
-            CSSOM edits and style-only changes, so use it only when other code is not changing the
-            preview. Full CSS guard also checks computed styles and geometry. This setting affects
-            RenderPDF.js timing; its warning appears below the results.
-          </p>
-          <label class="checkbox-label" for="profile-stages">
-            <input id="profile-stages" type="checkbox" aria-describedby="profile-help" />
-            Profile RenderPDF.js stages
-          </label>
-          <p id="profile-help" class="field-help">
-            Adds progress callbacks and scheduling overhead. Leave off for the regular timing
-            comparison.
-          </p>
-
-          <div class="actions">
-            <button id="refresh-preview" class="button-secondary" type="button">
-              Update preview
-            </button>
-            <button id="export-pdfs" class="button-primary" type="button" disabled>
-              Export and compare PDFs
-            </button>
-          </div>
-          <p id="status" class="status" role="status" aria-live="polite">
-            Preparing the example document…
-          </p>
-          <ul id="warnings" class="warnings" aria-label="Conversion limitations" hidden></ul>
-
-          <section id="results" class="results" aria-labelledby="results-title" hidden>
-            <h3 id="results-title">Export results</h3>
-            <div class="results-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Library</th>
-                    <th>Time</th>
-                    <th>Size</th>
-                    <th>Pages</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr id="render-result">
-                    <th id="render-label">RenderPDF.js · Fast static HTML</th>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                  <tr id="jspdf-result">
-                    <th>jsPDF</th>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <details id="render-profile" class="timing-profile" hidden>
-              <summary>RenderPDF.js stage timings</summary>
-              <dl id="render-phases"></dl>
-              <p>
-                Stage times are wall times between progress notifications. Other includes setup,
-                work between stages, callback scheduling, and final checks. Blob creation is
-                measured separately; all parts are included in the total above.
+              <details class="advanced-panel">
+                <summary>Fonts and profiling</summary>
+                <p class="field-help">
+                  Register local TrueType font bytes when the document requests a face that is not
+                  bundled. The preview and both exporters can then use the same font.
+                </p>
+                <fieldset class="font-panel" aria-describedby="font-help">
+                  <legend>Document font files</legend>
+                  <p id="font-help" class="field-help">
+                    Register matching local TTF files when a document uses a font that is not
+                    bundled. Files stay in this browser session. Missing faces may be substituted
+                    and reported.
+                  </p>
+                  <ul
+                    id="font-requirements"
+                    class="warnings"
+                    aria-label="Document font availability"
+                    hidden
+                  ></ul>
+                  <div class="font-fields">
+                    <div>
+                      <label for="font-family">CSS family</label>
+                      <input
+                        id="font-family"
+                        type="text"
+                        autocomplete="off"
+                        placeholder="Times New Roman"
+                      />
+                    </div>
+                    <div>
+                      <label for="font-weight">Weight</label>
+                      <input
+                        id="font-weight"
+                        type="number"
+                        min="100"
+                        max="900"
+                        step="100"
+                        value="400"
+                      />
+                    </div>
+                    <div>
+                      <label for="font-style">Style</label>
+                      <select id="font-style">
+                        <option value="normal">Normal</option>
+                        <option value="italic">Italic</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label for="font-file">Matching TTF file</label>
+                  <input id="font-file" type="file" accept=".ttf,font/ttf" />
+                  <button id="register-font" class="button-secondary" type="button">
+                    Register font
+                  </button>
+                  <p id="font-status" class="field-help" aria-live="polite"></p>
+                  <ul id="registered-fonts" aria-label="Registered document fonts"></ul>
+                </fieldset>
+                <label class="checkbox-label" for="profile-stages">
+                  <input id="profile-stages" type="checkbox" aria-describedby="profile-help" />
+                  Profile RenderPDF.js stages
+                </label>
+                <p id="profile-help" class="field-help">
+                  Progress callbacks add scheduling overhead to conversion timing.
+                </p>
+              </details>
+            </section>
+            <section id="output-section" class="output-section" aria-labelledby="output-title">
+              <div class="output-heading">
+                <div>
+                  <h2 id="output-title">Export and results</h2>
+                </div>
+                <button id="export-pdfs" class="button-primary" type="button" disabled>
+                  Export PDFs
+                </button>
+              </div>
+              <p id="status" class="status" role="status" aria-live="polite">
+                Preparing the example document…
               </p>
-            </details>
-            <p id="winner" class="winner" aria-live="polite"></p>
-          </section>
+              <div class="output-grid">
+                <section class="result-panel" aria-labelledby="results-panel-title">
+                  <h3 id="results-panel-title">Results</h3>
+                  <p class="panel-description">
+                    Conversion time, file size, and page count appear after export.
+                  </p>
+                  <section id="results" class="results" aria-labelledby="results-title" hidden>
+                    <h4 id="results-title" class="visually-hidden">Export measurements</h4>
+                    <div class="results-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Library</th>
+                            <th>Time</th>
+                            <th>Size</th>
+                            <th>Pages</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr id="render-result">
+                            <th id="render-label">RenderPDF.js</th>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                          </tr>
+                          <tr id="jspdf-result">
+                            <th>jsPDF</th>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <details id="render-profile" class="timing-profile" hidden>
+                      <summary>RenderPDF.js stage timings</summary>
+                      <dl id="render-phases"></dl>
+                      <p>
+                        Stage times are wall times between progress notifications. Other includes
+                        setup, work between stages, callback scheduling, and final checks. Blob
+                        creation is measured separately; all parts are included in the total above.
+                      </p>
+                    </details>
+                    <p id="winner" class="winner" aria-live="polite"></p>
+                  </section>
+                </section>
+                <aside class="diagnostics-panel" aria-labelledby="diagnostics-title">
+                  <h3 id="diagnostics-title">Library messages</h3>
+                  <p class="panel-description">
+                    Input limitations, RenderPDF.js warnings, and export errors appear here.
+                  </p>
+                  <p id="diagnostics-empty" class="empty-message">No messages yet.</p>
+                  <ul
+                    id="warnings"
+                    class="warnings"
+                    aria-label="Warnings and limitations"
+                    hidden
+                  ></ul>
+                  <ul id="errors" class="errors" aria-label="Export errors" hidden></ul>
+                </aside>
+              </div>
+            </section>
+          </div>
 
-          <aside class="rendering-note" aria-label="Conversion settings">
-            <strong>Comparison settings</strong>
-            <p>
-              Both libraries receive the same preview and available registered font bytes, A4 pages,
-              and 24 CSS px margins. Missing fonts may be substituted differently. RenderPDF.js
-              omits outer shadows and some table styles by default; the rejection checkbox makes
-              those effects fail instead. Timing includes conversion and PDF serialization,
-              excluding preview preparation and browser download handling. Different rendering and
-              pagination methods can change appearance and page count. RenderPDF.js is experimental.
-            </p>
-          </aside>
-        </section>
-
-        <section class="preview-panel" aria-labelledby="preview-title">
-          <div class="panel-heading preview-heading">
-            <div>
-              <p class="step-label">02 / Preview</p>
-              <h2 id="preview-title">HTML before conversion</h2>
+          <section class="preview-panel" aria-labelledby="preview-title">
+            <div class="panel-heading preview-heading">
+              <h2 id="preview-title">HTML view</h2>
             </div>
-            <span class="format-label">A4 · 100 %</span>
-          </div>
-          <p class="preview-help">
-            The preview is continuous; pagination is applied during PDF export.
-          </p>
-          <div class="preview-paper">
-            <div id="preview-host" aria-label="Uploaded HTML preview"></div>
-          </div>
-        </section>
+            <p class="preview-help">
+              This is a continuous browser preview. PDF page cuts are applied during export.
+            </p>
+            <div class="preview-paper">
+              <div id="preview-host" aria-label="HTML document preview"></div>
+            </div>
+          </section>
+        </div>
       </main>
-
       <footer class="app-footer">
-        Independent test application · uses the packaged renderpdf-js library and jsPDF
+        Local comparison using the packaged RenderPDF.js library and jsPDF.
       </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>

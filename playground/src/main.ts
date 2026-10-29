@@ -1,5 +1,10 @@
 import './style.css';
-import { registerFont, type RegisteredFont } from 'renderpdf-js';
+import {
+  registerFont,
+  RenderPDFError,
+  type RegisteredFont,
+  type RenderPDFOptions,
+} from 'renderpdf-js';
 import {
   measureJsPdf,
   measureRenderPdf,
@@ -8,8 +13,10 @@ import {
 } from './benchmark';
 import { createPreview, previewFamily } from './preview';
 import { inspectFontRequirements, type MissingFontFace } from './font-requirements';
+import { DEFAULT_OPTIONS_TEXT, parseOptions } from './options';
 import exampleOneHtml from './examples/example-1.html?raw';
 import exampleTwoHtml from './examples/example-2.html?raw';
+import logoUrl from '../../assets/renderpdf-logo.png?url';
 
 // Bundled static documents stay in the application and never enter the library package.
 const examples = new Map<string, string>([
@@ -40,6 +47,9 @@ function downloadPdf(
 async function initialize(): Promise<void> {
   // UI controls remain outside the source; changes there cannot enter the generated PDF.
   const input = document.querySelector<HTMLTextAreaElement>('#html-input')!;
+  const optionsInput = document.querySelector<HTMLTextAreaElement>('#options-input')!;
+  const optionsError = document.querySelector<HTMLElement>('#options-error')!;
+  document.querySelector<HTMLImageElement>('#brand-logo')!.src = logoUrl;
   const exampleSelect = document.querySelector<HTMLSelectElement>('#example-select')!;
   const fileInput = document.querySelector<HTMLInputElement>('#html-file')!;
   const fontFamilyInput = document.querySelector<HTMLInputElement>('#font-family')!;
@@ -50,16 +60,14 @@ async function initialize(): Promise<void> {
   const fontStatus = document.querySelector<HTMLElement>('#font-status')!;
   const missingFontList = document.querySelector<HTMLUListElement>('#font-requirements')!;
   const registeredFontList = document.querySelector<HTMLUListElement>('#registered-fonts')!;
-  const fontMismatch = document.querySelector<HTMLSelectElement>('#font-mismatch')!;
-  const strictCss = document.querySelector<HTMLInputElement>('#strict-css')!;
-  const respectPageBreaks = document.querySelector<HTMLInputElement>('#respect-page-breaks')!;
-  const sourceVerification = document.querySelector<HTMLSelectElement>('#source-verification')!;
   const profileStages = document.querySelector<HTMLInputElement>('#profile-stages')!;
   const refresh = document.querySelector<HTMLButtonElement>('#refresh-preview')!;
   const exportButton = document.querySelector<HTMLButtonElement>('#export-pdfs')!;
   const reset = document.querySelector<HTMLButtonElement>('#reset-example')!;
   const status = document.querySelector<HTMLElement>('#status')!;
   const warnings = document.querySelector<HTMLUListElement>('#warnings')!;
+  const errors = document.querySelector<HTMLUListElement>('#errors')!;
+  const diagnosticsEmpty = document.querySelector<HTMLElement>('#diagnostics-empty')!;
   const results = document.querySelector<HTMLElement>('#results')!;
   const renderRow = document.querySelector<HTMLTableRowElement>('#render-result')!;
   const renderLabel = document.querySelector<HTMLTableCellElement>('#render-label')!;
@@ -75,6 +83,7 @@ async function initialize(): Promise<void> {
   let previewContainer: HTMLElement | null = null;
   let renderFonts: readonly RegisteredFont[] = [];
   let activeFonts: readonly RegisteredFont[] = [];
+  let activeOptions: RenderPDFOptions | null = null;
   let missingFaces: readonly MissingFontFace[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   let isRegisteringFont = false;
@@ -87,6 +96,7 @@ async function initialize(): Promise<void> {
   ): void {
     for (const control of [
       input,
+      optionsInput,
       exampleSelect,
       fileInput,
       fontFamilyInput,
@@ -94,10 +104,6 @@ async function initialize(): Promise<void> {
       fontStyleInput,
       fontFileInput,
       registerFontButton,
-      fontMismatch,
-      strictCss,
-      respectPageBreaks,
-      sourceVerification,
       profileStages,
       refresh,
       reset,
@@ -106,6 +112,7 @@ async function initialize(): Promise<void> {
     exportButton.disabled = locked || isRegisteringFont || isExporting || source === null;
   }
   input.value = exampleOneHtml.trim();
+  optionsInput.value = DEFAULT_OPTIONS_TEXT;
   setControlsLocked(true);
   status.textContent = 'Loading fonts for the preview and PDFs…';
   // Static licensed faces avoid browser-synthesized regular/bold/italic variants.
@@ -142,6 +149,9 @@ async function initialize(): Promise<void> {
   /** Remove stale measurements whenever the document changes. */
   function clearResults(): void {
     results.hidden = true;
+    errors.replaceChildren();
+    errors.hidden = true;
+    diagnosticsEmpty.hidden = warnings.childElementCount > 0;
     renderProfile.hidden = true;
     renderProfile.open = false;
     renderPhases.replaceChildren();
@@ -149,6 +159,18 @@ async function initialize(): Promise<void> {
     for (const row of [renderRow, jsPdfRow]) {
       for (const cell of Array.from(row.cells).slice(1)) cell.textContent = '—';
     }
+  }
+
+  /** Place a visible input or exporter failure beside the measured results. */
+  function showError(
+    /** Origin and message to display without interpreting source HTML. */
+    message: string,
+  ): void {
+    const item = document.createElement('li');
+    item.textContent = message;
+    errors.append(item);
+    errors.hidden = false;
+    diagnosticsEmpty.hidden = true;
   }
 
   /** Show measured stage intervals and the time not covered by public progress notifications. */
@@ -208,14 +230,29 @@ async function initialize(): Promise<void> {
     clearResults();
     warnings.replaceChildren();
     warnings.hidden = true;
+    diagnosticsEmpty.hidden = false;
     source = null;
     previewContainer = null;
     renderFonts = [];
     activeFonts = [];
+    activeOptions = null;
     missingFaces = [];
     exportButton.disabled = true;
     missingFontList.replaceChildren();
     missingFontList.hidden = true;
+    optionsError.textContent = '';
+    optionsError.hidden = true;
+    // Keep a valid HTML preview visible even when its PDF settings are invalid.
+    let parsedOptions: RenderPDFOptions | null = null;
+    let optionsIssue: string | null = null;
+    try {
+      parsedOptions = parseOptions(optionsInput.value);
+    } catch (error) {
+      optionsIssue = error instanceof Error ? error.message : String(error);
+      optionsError.textContent = optionsIssue;
+      optionsError.hidden = false;
+      showError(`Options: ${optionsIssue}`);
+    }
     try {
       // Validation and layout creation finish before replacing the last source reference.
       const next = createPreview(input.value);
@@ -224,7 +261,7 @@ async function initialize(): Promise<void> {
       missingFaces = requirements.missing;
       for (const face of requirements.missing) {
         const item = document.createElement('li');
-        item.textContent = `No matching bytes for ${face.family} · ${face.weight} ${face.style}. Register its TTF for an exact font, or use the selected mismatch mode.`;
+        item.textContent = `No matching bytes for ${face.family} · ${face.weight} ${face.style}. Register its TTF for an exact font, or use fontMismatch in the JSON options.`;
         missingFontList.append(item);
       }
       for (const issue of requirements.unsupported) {
@@ -238,10 +275,22 @@ async function initialize(): Promise<void> {
         fontWeightInput.value = String(requirements.missing[0]!.weight);
         fontStyleInput.value = requirements.missing[0]!.style;
       }
-      source = next.exportIssues.length === 0 ? next.source : null;
+      source = next.exportIssues.length === 0 && parsedOptions ? next.source : null;
       previewContainer = source ? next.container : null;
-      // Only exact faces belong to RenderPDF.js; an empty list selects its bundled base font.
-      renderFonts = source ? requirements.usedFonts : [];
+      activeOptions = source ? parsedOptions : null;
+      // A requested substitute must be supplied even when the source never uses that family.
+      const fallbackFamily = parsedOptions?.fontFallback?.toLowerCase();
+      const preferredFallbackFaces = fallbackFamily
+        ? fonts.filter((font) => font.family.toLowerCase() === fallbackFamily)
+        : [];
+      renderFonts = source
+        ? [...new Set([...requirements.usedFonts, ...preferredFallbackFaces])]
+        : [];
+      const effectiveMismatch =
+        parsedOptions?.fontMismatch ??
+        (requirements.usedFonts.length === 0 || parsedOptions?.fontFallback !== undefined
+          ? 'fallback'
+          : 'error');
       // jsPDF still receives application faces for its independent HTML conversion.
       const fallbackFaces = requirements.missing.map(
         (face) =>
@@ -253,7 +302,6 @@ async function initialize(): Promise<void> {
           ) ?? fonts[0]!,
       );
       const needsBaseFace =
-        fontMismatch.value === 'fallback' ||
         requirements.missing.length > 0 ||
         requirements.unsupported.length > 0 ||
         requirements.usedFonts.length === 0;
@@ -273,19 +321,27 @@ async function initialize(): Promise<void> {
         warnings.append(item);
       }
       warnings.hidden = warnings.childElementCount === 0;
-      status.textContent = source
-        ? missingFontList.childElementCount > 0
-          ? fontMismatch.value === 'fallback'
-            ? 'The preview is ready. RenderPDF.js will report any font substitutions after export.'
-            : 'The preview is ready. RenderPDF.js will return an error if a font cannot be matched.'
-          : 'The preview is up to date. Both PDFs will use this document.'
-        : 'The HTML is displayed. Replace the marked images before exporting.';
+      diagnosticsEmpty.hidden = warnings.childElementCount > 0 || errors.childElementCount > 0;
+      renderLabel.textContent =
+        parsedOptions?.verifySource === 'mutations'
+          ? 'RenderPDF.js · Fast static HTML'
+          : 'RenderPDF.js · Full CSS guard';
+      status.textContent = optionsIssue
+        ? 'Correct the JSON options before exporting.'
+        : source
+          ? missingFontList.childElementCount > 0
+            ? effectiveMismatch === 'fallback'
+              ? 'The preview is ready. RenderPDF.js will report any font substitutions after export.'
+              : 'The preview is ready. RenderPDF.js will return an error if a font cannot be matched.'
+            : 'The preview is up to date. Both PDFs will use this document.'
+          : 'The HTML is displayed. Replace the marked images before exporting.';
     } catch (error) {
       shadow.replaceChildren();
       missingFaces = [];
       missingFontList.replaceChildren();
       missingFontList.hidden = true;
       status.textContent = error instanceof Error ? error.message : String(error);
+      showError(`HTML preview: ${status.textContent}`);
     }
   }
 
@@ -302,26 +358,20 @@ async function initialize(): Promise<void> {
     updatePreview();
   }
 
-  input.addEventListener('input', () => {
+  /** Debounce editor changes while allowing the export click to flush them synchronously. */
+  function schedulePreviewUpdate(): void {
     clearTimeout(timer);
     clearResults();
     source = null;
     previewContainer = null;
+    activeOptions = null;
     // Keep export clickable while debouncing: its handler validates and flushes current input.
     exportButton.disabled = isRegisteringFont || isExporting;
     status.textContent = 'Updating the preview…';
     timer = setTimeout(updatePreview, 250);
-  });
-  strictCss.addEventListener('change', clearResults);
-  fontMismatch.addEventListener('change', updatePreview);
-  respectPageBreaks.addEventListener('change', clearResults);
-  sourceVerification.addEventListener('change', () => {
-    renderLabel.textContent =
-      sourceVerification.value === 'full'
-        ? 'RenderPDF.js · Full CSS guard'
-        : 'RenderPDF.js · Fast static HTML';
-    clearResults();
-  });
+  }
+  input.addEventListener('input', schedulePreviewUpdate);
+  optionsInput.addEventListener('input', schedulePreviewUpdate);
   profileStages.addEventListener('change', clearResults);
   exampleSelect.addEventListener('change', loadSelectedExample);
   registerFontButton.addEventListener('click', async () => {
@@ -404,7 +454,7 @@ async function initialize(): Promise<void> {
   exportButton.addEventListener('click', async () => {
     if (isRegisteringFont || isExporting) return;
     updatePreview();
-    if (!source || !previewContainer) return;
+    if (!source || !previewContainer || !activeOptions) return;
     // Lock all editing before conversion; no preview replacement may race with measurement/capture.
     isExporting = true;
     setControlsLocked(true);
@@ -416,10 +466,7 @@ async function initialize(): Promise<void> {
       renderMeasurement = await measureRenderPdf(
         source,
         renderFonts,
-        fontMismatch.value === 'error' ? 'error' : 'fallback',
-        strictCss.checked,
-        respectPageBreaks.checked ? 'css' : 'auto',
-        sourceVerification.value === 'full' ? 'full' : 'mutations',
+        activeOptions,
         profileStages.checked,
       );
       showMeasurement(renderRow, renderMeasurement);
@@ -430,16 +477,26 @@ async function initialize(): Promise<void> {
         warnings.append(item);
       }
     } catch (error) {
-      showMeasurement(renderRow, error instanceof Error ? error.message : String(error));
+      const message =
+        error instanceof RenderPDFError
+          ? `${error.code}: ${error.message}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      showMeasurement(renderRow, message);
+      showError(`RenderPDF.js: ${message}`);
     }
     status.textContent = 'Measuring jsPDF…';
     try {
       jsPdfMeasurement = await measureJsPdf(previewContainer, activeFonts);
       showMeasurement(jsPdfRow, jsPdfMeasurement);
     } catch (error) {
-      showMeasurement(jsPdfRow, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      showMeasurement(jsPdfRow, message);
+      showError(`jsPDF: ${message}`);
     }
     warnings.hidden = warnings.childElementCount === 0;
+    diagnosticsEmpty.hidden = warnings.childElementCount > 0 || errors.childElementCount > 0;
     try {
       if (renderMeasurement) downloadPdf(renderMeasurement.blob, 'renderpdf.pdf');
       if (jsPdfMeasurement) downloadPdf(jsPdfMeasurement.blob, 'jspdf.pdf');

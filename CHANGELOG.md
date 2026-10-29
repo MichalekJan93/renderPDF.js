@@ -6,6 +6,22 @@ than every changed file. The **Why** column describes the problem each change
 addresses. Release contents were checked against the Git tags, commit diffs and
 npm version history.
 
+## [0.6.0](https://www.npmjs.com/package/renderpdf-js/v/0.6.0) — 2026-10-29
+
+| What changed                                                                                                                                                                  | Where                                                                                                    | Why                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Allow HTML export without caller-supplied fonts, load licensed base faces only when needed, and report or reject missing CSS faces through `fontMismatch` and `fontFallback`. | `src/base-font.ts`, `src/fonts.ts`, `src/render-html.ts`, `src/render-pdf.ts`, `src/pdf.ts`, `README.md` | Make the common no-font call usable while keeping substitutions visible and exact-font mode available.     |
+| Keep simple rounded boxes native, improve safe local raster selection and ordered composition, and avoid duplicate fallback text or image paint.                              | `src/planner.ts`, `src/layout.ts`, `src/raster.ts`, `src/pdf.ts`                                         | Preserve selectable text and local image boundaries in mixed HTML documents.                               |
+| Omit selected unsupported outer shadows and table decoration by default, offer `strictCss` rejection, and refine browser-measured inline text and table handling.             | `src/planner.ts`, `src/layout.ts`, `src/render-pdf.ts`, `README.md`                                      | Export supported content without silently claiming unsupported decoration was reproduced.                  |
+| Reuse prepared resources while retaining CSSOM source checks, and compare local raster pixels at the capture scale in browser regressions.                                    | `src/render-pdf.ts`, `src/raster.ts`, `tests/browser/`, `tests/README.md`                                | Reduce repeated export work and make visual regressions less sensitive to downsampling.                    |
+| Add a plain two-column playground with HTML examples, JSON options, font registration, a live preview, and export results and diagnostics below the left editor.              | `playground/`, `README.md`, `tests/README.md`                                                            | Let users exercise the packaged public API and find export outcomes without scrolling past a long preview. |
+| Validate the published package inventory and expand browser checks for font substitution, CSS policy and the independent consumer.                                            | `scripts/check-package.ts`, `tests/`, `playground/tests/`                                                | Catch missing assets, unsupported behavior and integration regressions before publication.                 |
+
+Font substitution can change line wrapping when `renderPDF()` exports an already
+connected source. `renderHTML()` can relayout an isolated copy; register exact
+font bytes when matching the browser's text geometry matters. The renderer
+remains experimental and does not support arbitrary HTML/CSS.
+
 ## [0.5.1](https://www.npmjs.com/package/renderpdf-js/v/0.5.1) — 2026-10-27
 
 | What changed                                                                                                                    | Where                                                                           | Why                                                                                                                     |

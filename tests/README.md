@@ -137,16 +137,20 @@ rows through the adapter, checking Unicode text, truncation, headers and two-par
 footers. This optional test does not establish support for every jsPDF plugin.
 
 The independent [playground](../playground/README.md) has its own `npm ci` and
-`npm run check`. Its eleven Chromium tests cover both actual PDF downloads,
+`npm run check`. Its twelve Chromium tests cover both actual PDF downloads,
 extraction/margins/timing-and-size metrics, legacy metadata, HTML upload/file
-validation, strict-CSS and page-break controls, optional stage profiling with
+validation, strict-CSS and page-break JSON options, optional stage profiling with
 rounded total accounting, both source-verification modes and their warning,
 optional exact CSS font matching, fallback diagnostics, strict mismatch and local
-TTF upload,
-the two-example selector, reset/empty states and unsafe markup/resources
-including shadow-style isolation escapes. Root `npm run check`
-does not run it; CI packs the library and tests that installed consumer
-separately. Packaging/reinstallation instructions are in its README.
+TTF upload, the two-example selector, reset/empty states and unsafe
+markup/resources including shadow-style isolation escapes. A focused UI test
+checks the logo badge, desktop columns, export/results/messages below the left
+editor while the right preview remains longer, prefilled public options,
+invalid-JSON export blocking, and an actual PDF export
+with a changed margin. The other option tests check strict CSS rejection and PDF
+page ownership after changing JSON values. Root `npm run check` does not run the
+playground; CI packs the library and tests that installed consumer separately.
+Packaging/reinstallation instructions are in its README.
 Bundled [Example 1](../playground/src/examples/example-1.html) is a static 200-row
 directory. A playground test exports it through the installed package and checks
 all 200 selectable IDs in order, five local raster paints outside its rows and
@@ -162,7 +166,8 @@ strict mismatch mode. A separate font test
 checks that generic serif does not block the export control, that strict mode
 reports a RenderPDF.js error for missing custom faces while jsPDF can finish,
 then uploads licensed regular and bold fixture TTF files under an explicit
-sample family and checks extracted text in both PDFs. No test asserts a
+sample family, checks extracted text in both PDFs, and selects that registered
+family as a JSON fallback for a different missing CSS face. No test asserts a
 machine-dependent export time or bundles proprietary system fonts. A text-free
 source test verifies both exporters with the application's minimal base handle.
 

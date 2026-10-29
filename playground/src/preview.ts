@@ -3,10 +3,10 @@ export const contentWidthPx = 745.7;
 // One application-owned family binds preview layout to the same explicit PDF font programs.
 export const previewFamily = 'Playground Sans';
 
-/** Discard document font programs because the preview explicitly uses its own registered faces.
+/** Discard authored font programs because this preview permits only registered local face bytes.
  * @param css Inert stylesheet text whose remaining declarations must still pass resource checks.
  */
-function omitDocumentFonts(css: string): string {
+function omitDocumentFonts(css: string): { css: string; removedFontFaces: number } {
   if (/@import\b|\\/i.test(css)) {
     throw new Error(
       'External resources and escaped CSS declarations are not allowed in this preview.',
@@ -15,6 +15,8 @@ function omitDocumentFonts(css: string): string {
   // Native CSS parsing handles rule boundaries, quoted strings and nested grouping rules.
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(css);
+  // The caller reports discarded authored faces instead of silently changing the source font.
+  let removedFontFaces = 0;
 
   /** Delete backwards so each removal leaves all remaining rule indexes valid.
    * @param owner Inert stylesheet or conditional group containing authored rules.
@@ -23,18 +25,20 @@ function omitDocumentFonts(css: string): string {
     for (let index = owner.cssRules.length - 1; index >= 0; index -= 1) {
       // Font declarations are never attached, so their local/URL sources cannot be loaded.
       const rule = owner.cssRules[index];
-      if (rule instanceof CSSFontFaceRule) owner.deleteRule(index);
-      else if (rule instanceof CSSGroupingRule) removeFontRules(rule);
+      if (rule instanceof CSSFontFaceRule) {
+        owner.deleteRule(index);
+        removedFontFaces += 1;
+      } else if (rule instanceof CSSGroupingRule) removeFontRules(rule);
     }
   }
   removeFontRules(sheet);
-  return Array.from(sheet.cssRules, (rule) => rule.cssText).join('\n');
+  return { css: Array.from(sheet.cssRules, (rule) => rule.cssText).join('\n'), removedFontFaces };
 }
 
 /** Reject active content and resource dependencies before a fragment enters the live document.
  * @param root Inert parsed document or template content to inspect.
  */
-function assertStaticHtml(root: ParentNode): void {
+function assertStaticHtml(root: ParentNode): number {
   if (
     root.querySelector(
       'script, iframe, frame, object, embed, form, input, button, link, base, audio, video, source, track, svg, math, template, meta[http-equiv]:not([http-equiv="content-type" i]):not([http-equiv="content-language" i])',
@@ -43,8 +47,11 @@ function assertStaticHtml(root: ParentNode): void {
     throw new Error('Provide static HTML without scripts, forms, or embedded documents.');
   }
   // Normalize only inert copies; the editor retains every original declaration for the caller.
+  let removedFontFaces = 0;
   for (const style of root.querySelectorAll('style')) {
-    style.textContent = omitDocumentFonts(style.textContent);
+    const normalized = omitDocumentFonts(style.textContent);
+    style.textContent = normalized.css;
+    removedFontFaces += normalized.removedFontFaces;
   }
   // Both style elements and inline declarations must be independent of external resources.
   const css = [
@@ -70,6 +77,7 @@ function assertStaticHtml(root: ParentNode): void {
       }
     }
   }
+  return removedFontFaces;
 }
 
 /** Translate document selectors through the browser CSS parser into isolated preview wrappers.
@@ -127,6 +135,8 @@ export function createPreview(html: string): {
   source: HTMLElement;
   /** Missing assets stay visible in the preview but prevent an incomplete PDF export. */
   exportIssues: readonly string[];
+  /** Authored font programs that cannot be owned automatically are reported beside the preview. */
+  limitations: readonly string[];
 } {
   if (!html.trim()) throw new Error('The HTML is empty. Provide a document first.');
   // Template contents do not fetch image/iframe resources while the initial boundary is inspected.
@@ -135,7 +145,7 @@ export function createPreview(html: string): {
   assertStaticHtml(inert.content);
   // A second inert parse preserves full-document body attributes after resource validation.
   const parsed = new DOMParser().parseFromString(html, 'text/html');
-  assertStaticHtml(parsed);
+  const removedFontFaces = assertStaticHtml(parsed);
   // Informational metadata never paints, even when legacy markup places it inside the body.
   for (const metadata of parsed.querySelectorAll('meta')) metadata.remove();
   // Pasted HTML does not carry relative files; placeholders expose missing assets without fetching them.
@@ -167,7 +177,7 @@ export function createPreview(html: string): {
   styles.textContent =
     `
     [data-preview-html] { all: initial; display: block; width: ${contentWidthPx}px; }
-    [data-preview-body] { padding: 8px; background: white; color: black; font: 16px/normal '${previewFamily}'; }
+    [data-preview-body] { padding: 8px; background: white; color: black; font: 16px/normal serif; }
   ` + isolatedCss(authoredStyles.map((style) => style.textContent).join('\n'));
   for (const style of authoredStyles) style.remove();
   // Separate wrappers retain common html/body selectors without exporting unsupported tag names.
@@ -188,12 +198,18 @@ export function createPreview(html: string): {
     width: `${contentWidthPx}px`,
     margin: '0',
   });
-  // Font substitution is deliberate and disclosed in the UI; never pair system layout with other bytes.
-  for (const element of [source, ...source.querySelectorAll<HTMLElement>('*')]) {
-    element.style.setProperty('font-family', previewFamily, 'important');
-  }
   documentRoot.append(source);
   documentRoot.inert = true;
   container.append(styles, documentRoot);
-  return { container, source, exportIssues };
+  return {
+    container,
+    source,
+    exportIssues,
+    limitations:
+      removedFontFaces > 0
+        ? [
+            `${removedFontFaces} document @font-face declaration(s) were ignored. Register matching local TTF files for every used CSS family before exporting.`,
+          ]
+        : [],
+  };
 }

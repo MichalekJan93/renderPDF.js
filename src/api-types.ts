@@ -145,8 +145,12 @@ export interface RenderPDFOptions extends Omit<PDFPageOptions, 'orientation'> {
   orientation?: 'portrait' | 'landscape' | 'auto';
   /** Keep source size by default; width fits a wider measured source uniformly on each page. */
   fit?: 'none' | 'width';
-  /** Explicit registered faces used by the supplied source; no implicit font substitution. */
-  fonts: readonly RegisteredFont[];
+  /** Exact registered faces; omitted fonts use the bundled base family when needed. */
+  fonts?: readonly RegisteredFont[];
+  /** Missing CSS faces reject, or use a base face and report FONT_SUBSTITUTED. */
+  fontMismatch?: 'error' | 'fallback';
+  /** Preferred registered family for fallback; omitted uses the bundled base family. */
+  fontFallback?: string;
   /** Physical pixels per CSS pixel in selected local raster regions, defaulting to 2. */
   rasterScale?: number;
   /** Automatically rasterize safe local effects (default auto); strict requires explicit data-raster. */

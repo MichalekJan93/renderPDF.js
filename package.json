@@ -38,11 +38,13 @@
   "sideEffects": false,
   "files": [
     "dist/index.js",
+    "dist/base-font-*.js",
     "dist/*.d.ts",
     "README.md",
     "CHANGELOG.md",
     "API.md",
     "LICENSE",
+    "assets/NotoSans-OFL.txt",
     "assets/renderpdf-logo.png"
   ],
   "engines": {

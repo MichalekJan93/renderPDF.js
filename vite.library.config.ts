@@ -6,6 +6,8 @@ export default defineConfig({
   publicDir: false,
   build: {
     outDir: 'dist',
+    // Keep the licensed base font self-contained in the browser ESM bundle.
+    assetsInlineLimit: 1_000_000,
     lib: {
       entry: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
       formats: ['es'],
@@ -13,6 +15,10 @@ export default defineConfig({
     },
     rolldownOptions: {
       external: ['pdf-lib', '@pdf-lib/fontkit', 'html-to-image', 'utif2'],
+      output: {
+        // The optional base font stays in a separate, package-owned browser module.
+        chunkFileNames: '[name]-[hash].js',
+      },
     },
   },
 });

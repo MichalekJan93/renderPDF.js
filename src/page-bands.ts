@@ -158,8 +158,8 @@ export function resolvePageBands(
   /** Validated options whose font handles remain immutable. */
   options: RenderPDFOptions,
 ) {
-  const header = resolveBand(options.header, options.fonts);
-  const footer = resolveBand(options.footer, options.fonts);
+  const header = resolveBand(options.header, options.fonts ?? []);
+  const footer = resolveBand(options.footer, options.fonts ?? []);
   // Only content margins grow; the writer still knows the original band positions.
   const content: PageGeometry = {
     ...page,

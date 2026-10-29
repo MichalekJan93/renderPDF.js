@@ -7,7 +7,7 @@ import type {
 import { RenderPDFError, throwIfAborted, type RenderWarning } from './diagnostics.js';
 import { collectPageBreaks } from './breaks.js';
 import { resolveMetadata } from './export-options.js';
-import { validateRegisteredFonts } from './fonts.js';
+import { registerFont, validateRegisteredFonts } from './fonts.js';
 import { measurePreparedLayout } from './layout.js';
 import { resolvePage } from './page.js';
 import { resolvePageBands, type PageBand, type PreparedPageBand } from './page-bands.js';
@@ -37,6 +37,10 @@ async function preparePageBand(
     rasterScale: number;
     /** Source guard policy also used by the decoration. */
     verifySource: 'full' | 'mutations';
+    /** Reject unavailable faces or paint them with a diagnosed base face. */
+    fontMismatch: 'error' | 'fallback';
+    /** Registered family selected for substitution when requested. */
+    fontFallback: string | undefined;
     /** Parent cancellation signal, including an absent signal. */
     signal: AbortSignal | undefined;
   },
@@ -70,6 +74,8 @@ async function preparePageBand(
       ...(options.fallback ? { fallback: options.fallback } : {}),
       ...(options.rasterScale ? { rasterScale: options.rasterScale } : {}),
       ...(options.verifySource ? { verifySource: options.verifySource } : {}),
+      fontMismatch: options.fontMismatch,
+      ...(options.fontFallback ? { fontFallback: options.fontFallback } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     },
     includeRasterText,
@@ -91,17 +97,21 @@ export async function renderDocument(
   /** Connected source whose browser layout and markup stay caller-owned. */
   element: HTMLElement,
   /** Explicit fonts and the small supported page, raster and diagnostic options. */
-  options: RenderPDFOptions,
+  options: RenderPDFOptions = {},
   /** Research-only switch for comparing visible pixels without the invisible text layer. */
   includeRasterText = true,
 ) {
   // Validate and copy paper geometry before asynchronous work can observe caller changes.
   let page = resolvePage(options);
-  let bands = resolvePageBands(page, options);
   const metadata = resolveMetadata(options.metadata);
   // Fonts are immutable registration handles; copy the collection to stabilize face selection.
-  const fonts = [...options.fonts];
-  validateRegisteredFonts(fonts, element.ownerDocument);
+  const suppliedFonts = [...(options.fonts ?? [])];
+  validateRegisteredFonts(suppliedFonts, element.ownerDocument);
+  // Capture caller-owned band fields before lazy font loading can yield to application code.
+  const requestedHeader =
+    options.header && typeof options.header === 'object' ? { ...options.header } : options.header;
+  const requestedFooter =
+    options.footer && typeof options.footer === 'object' ? { ...options.footer } : options.footer;
   // Preserve primitive options and callback identity throughout this export.
   const {
     signal,
@@ -115,7 +125,12 @@ export async function renderDocument(
     orientation = 'portrait',
     fit = 'none',
     verifySource = 'full',
+    fontFallback: requestedFontFallback,
   } = options;
+  // Existing explicit-font calls keep strict behavior; no-font calls use a diagnosed base face.
+  const fontMismatch =
+    options.fontMismatch ??
+    (suppliedFonts.length === 0 || requestedFontFallback !== undefined ? 'fallback' : 'error');
   if (typeof strictCss !== 'boolean') {
     throw new RenderPDFError('INVALID_OPTIONS', 'strictCss must be a boolean.');
   }
@@ -131,8 +146,8 @@ export async function renderDocument(
   const progress = createProgressReporter(onProgress, signal);
   const reportProgress = progress.report;
   try {
-    for (const band of [bands.header, bands.footer]) {
-      if (!band || !('kind' in band) || band.kind !== 'html') continue;
+    for (const band of [requestedHeader, requestedFooter]) {
+      if (!band || !('element' in band)) continue;
       if (
         band.element.ownerDocument !== element.ownerDocument ||
         element.contains(band.element) ||
@@ -146,6 +161,37 @@ export async function renderDocument(
       bandSources.push(prepareSource(band.element, signal, verifySource));
     }
     if (reportProgress) await reportProgress({ stage: 'preparing', completed: 0, total: 1 });
+    // A lazy chunk keeps the bundled programs out of exact-font consumers' initial download.
+    const fonts = [...suppliedFonts];
+    let fallbackFamily = fontMismatch === 'fallback' ? requestedFontFallback : undefined;
+    if (fonts.length === 0 || (fontMismatch === 'fallback' && !fallbackFamily)) {
+      const base = await import('./base-font.js');
+      fonts.push(
+        ...(await base.loadBaseFonts(
+          element.ownerDocument,
+          registerFont,
+          () => new RenderPDFError('FONT_LOAD_FAILED', 'Bundled base font could not be loaded.'),
+        )),
+      );
+      if (fontMismatch === 'fallback') fallbackFamily = base.BASE_FONT_FAMILY;
+    }
+    validateRegisteredFonts(fonts, element.ownerDocument);
+    if (
+      fallbackFamily &&
+      !fonts.some((font) => font.family.toLowerCase() === fallbackFamily.toLowerCase())
+    ) {
+      throw new RenderPDFError(
+        'INVALID_OPTIONS',
+        `fontFallback requires a registered family: ${fallbackFamily}.`,
+      );
+    }
+    // Resolve the original band values, even if the caller changed its options while fonts loaded.
+    const bandOptions: RenderPDFOptions = { ...options, fonts };
+    delete bandOptions.header;
+    delete bandOptions.footer;
+    if (requestedHeader !== undefined) bandOptions.header = requestedHeader;
+    if (requestedFooter !== undefined) bandOptions.footer = requestedFooter;
+    let bands = resolvePageBands(page, bandOptions);
     await source.ready();
     // A band may wait for its own images or fonts; own the main CSS state across that yield.
     if (reportProgress || bandSources.length) source.captureBaseline();
@@ -161,6 +207,7 @@ export async function renderDocument(
       fallback,
       repeatTableHeaders,
       strictCss,
+      ...(fallbackFamily ? { fontFallback: fallbackFamily } : {}),
     });
     // Auto orientation chooses the wider paper only when portrait cannot contain source width.
     if (
@@ -208,7 +255,15 @@ export async function renderDocument(
       element,
       fonts,
       page,
-      { fallback, strictCss, rasterScale, verifySource, signal },
+      {
+        fallback,
+        strictCss,
+        rasterScale,
+        verifySource,
+        fontMismatch,
+        fontFallback: fallbackFamily,
+        signal,
+      },
       includeRasterText,
     );
     const footer = await preparePageBand(
@@ -216,7 +271,15 @@ export async function renderDocument(
       element,
       fonts,
       page,
-      { fallback, strictCss, rasterScale, verifySource, signal },
+      {
+        fallback,
+        strictCss,
+        rasterScale,
+        verifySource,
+        fontMismatch,
+        fontFallback: fallbackFamily,
+        signal,
+      },
       includeRasterText,
     );
     // Rendering an HTML band yields to independent browser work; recheck the main source afterward.
@@ -249,6 +312,7 @@ export async function renderDocument(
         sourceScale,
         omitUnsupportedCss: !strictCss,
         includeRasterText,
+        ...(fallbackFamily ? { fontFallback: fallbackFamily } : {}),
         ...(header.band ? { header: header.band } : {}),
         ...(footer.band ? { footer: footer.band } : {}),
         ...(metadata ? { metadata } : {}),
@@ -280,7 +344,7 @@ export async function renderPDF(
   /** Connected source; browser layout and caller-owned markup remain unchanged. */
   element: HTMLElement,
   /** Explicit font programs and supported conversion options. */
-  options: RenderPDFOptions,
+  options: RenderPDFOptions = {},
 ): Promise<RenderPDFResult> {
   // The evidence runner and public API share exactly one preparation and rendering pipeline.
   const output = await renderDocument(element, options);

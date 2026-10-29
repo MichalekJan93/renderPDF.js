@@ -8,7 +8,7 @@ import type {
 } from './api-types.js';
 import { RenderPDFError, throwIfAborted, type RenderWarning } from './diagnostics.js';
 import { computedStyle, isHtmlElement } from './dom.js';
-import { registerFont } from './fonts.js';
+import { copyFontBytes, registerFont, resolveRegisteredFont, selectFallbackFont } from './fonts.js';
 import { resolvePageGeometry } from './page.js';
 import { withCancellation } from './prepare.js';
 import { renderPDF } from './render-pdf.js';
@@ -27,13 +27,11 @@ export type RenderHTMLTextBand = Omit<PageTextOptions, 'font'> | Omit<PageTextSl
 /** Self-contained HTML-string entry point; all created DOM and font faces are released together. */
 export interface RenderHTMLOptions extends Omit<RenderPDFOptions, 'fonts' | 'header' | 'footer'> {
   /** Exact font programs to register inside this export's isolated document. */
-  fonts: readonly Omit<FontSource, 'document'>[];
+  fonts?: readonly Omit<FontSource, 'document'>[];
   /** Full document or fragment in a ShadowRoot; both modes use an owned sandboxed iframe. */
   isolation?: 'iframe' | 'shadow';
   /** Browser viewport width in CSS pixels before PDF fitting; defaults to portrait printable width. */
   sourceWidth?: number;
-  /** Supplied family used to relayout copied elements whose first CSS family is unregistered. */
-  fontFallback?: string;
   /** Repeated text or HTML in a reserved band above each page. */
   header?: RenderHTMLTextBand | RenderHTMLBand;
   /** Repeated text or HTML in a reserved band below each page. */
@@ -127,29 +125,51 @@ function resolveHtmlBand(
   return band;
 }
 
-/** Reflow only copied elements whose CSS first family has no supplied program. */
+/** Reflow only copied elements whose computed CSS face has no supplied program. */
 function substituteFonts(
   source: HTMLElement,
   registered: readonly RegisteredFont[],
   fallbackFamily: string,
-): number {
-  const families = new Set(registered.map((font) => font.family.toLowerCase()));
-  if (!families.has(fallbackFamily.toLowerCase())) {
-    throw new RenderPDFError('INVALID_OPTIONS', 'fontFallback must name a supplied font family.');
-  }
-  let substitutions = 0;
-  for (const element of [source, ...source.querySelectorAll('*')]) {
-    if (!isHtmlElement(element)) continue;
-    const firstFamily = computedStyle(element)
-      .fontFamily.split(',')[0]
-      ?.trim()
-      .replace(/^["']|["']$/g, '')
-      .toLowerCase();
-    if (firstFamily && !families.has(firstFamily)) {
-      // An inline important declaration changes browser layout before its PDF geometry is read.
-      element.style.setProperty('font-family', `"${fallbackFamily}"`, 'important');
-      substitutions += 1;
+): Map<string, string> {
+  // Only ancestors of actual text can affect its inherited face or request a substitute.
+  const textAncestors = new Set<HTMLElement>();
+  const walker = source.ownerDocument.createTreeWalker(source, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (!node.textContent?.trim()) continue;
+    // Hidden source text creates neither measured lines nor a font requirement.
+    const visibleAncestors: HTMLElement[] = [];
+    let ancestor = node.parentElement;
+    while (ancestor && source.contains(ancestor)) {
+      if (!isHtmlElement(ancestor)) break;
+      const style = computedStyle(ancestor);
+      if (style.display === 'none' || style.visibility !== 'visible') {
+        visibleAncestors.length = 0;
+        break;
+      }
+      visibleAncestors.push(ancestor);
+      if (ancestor === source) break;
+      ancestor = ancestor.parentElement;
     }
+    for (const visibleAncestor of visibleAncestors) textAncestors.add(visibleAncestor);
+  }
+  // Parent-first mutations let inherited descendants immediately see the new browser face.
+  const substitutions = new Map<string, string>();
+  for (const element of [source, ...source.querySelectorAll('*')]) {
+    if (!isHtmlElement(element) || !textAncestors.has(element)) continue;
+    const style = computedStyle(element);
+    try {
+      resolveRegisteredFont(style, registered);
+      continue;
+    } catch (error) {
+      if (!(error instanceof RenderPDFError) || error.code !== 'MISSING_FONT') throw error;
+    }
+    const face = selectFallbackFont(style, registered, fallbackFamily);
+    const requested = `${style.fontFamily} ${style.fontWeight} ${style.fontStyle}`;
+    substitutions.set(requested, `${face.family} ${face.weight} ${face.style}`);
+    // The isolated copy can adopt the chosen face before browser layout is measured.
+    element.style.setProperty('font-family', `"${face.family}"`, 'important');
+    element.style.setProperty('font-weight', String(face.weight), 'important');
+    element.style.setProperty('font-style', face.style, 'important');
   }
   return substitutions;
 }
@@ -159,21 +179,36 @@ export async function renderHTML(
   /** A full document for iframe mode, or a fragment for shadow mode. */
   html: string,
   /** Explicit font programs, page layout, optional source width and isolation policy. */
-  options: RenderHTMLOptions,
+  options: RenderHTMLOptions = {},
 ): Promise<RenderPDFResult> {
-  if (!options || !Array.isArray(options.fonts) || options.fonts.length === 0) {
-    throw new RenderPDFError('INVALID_OPTIONS', 'renderHTML requires explicit font programs.');
+  if (!options || (options.fonts !== undefined && !Array.isArray(options.fonts))) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'renderHTML fonts must be an array when provided.');
   }
   assertInertMarkup(html, 'Source');
   const {
-    fonts: fontSources,
+    fonts: requestedFonts,
     isolation = 'iframe',
     sourceWidth,
     fontFallback,
+    fontMismatch: requestedFontMismatch,
     header,
     footer,
     ...pdfOptions
   } = options;
+  // Copy caller-owned descriptors and bytes before iframe loading yields to application code.
+  const fontSources = (requestedFonts ?? []).map((font) => ({
+    ...font,
+    data: copyFontBytes(font.data),
+  }));
+  const fontMismatch =
+    requestedFontMismatch ??
+    (fontSources.length === 0 || fontFallback !== undefined ? 'fallback' : 'error');
+  if (fontMismatch !== 'error' && fontMismatch !== 'fallback') {
+    throw new RenderPDFError('INVALID_OPTIONS', 'fontMismatch must be error or fallback.');
+  }
+  if (fontFallback !== undefined && (typeof fontFallback !== 'string' || !fontFallback.trim())) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'fontFallback must be a nonempty font family.');
+  }
   if (isolation !== 'iframe' && isolation !== 'shadow') {
     throw new RenderPDFError('INVALID_OPTIONS', 'HTML isolation must be iframe or shadow.');
   }
@@ -228,38 +263,73 @@ export async function renderHTML(
       source.innerHTML = html;
       shadow.append(source);
     }
-    const fonts = await Promise.all(
+    const supplied = await Promise.all(
       fontSources.map((font) => registerFont({ ...font, document: sourceDocument })),
     );
+    const fonts = [...supplied];
+    let fallbackFamily = fontMismatch === 'fallback' ? fontFallback : undefined;
+    if (fonts.length === 0 || (fontMismatch === 'fallback' && !fallbackFamily)) {
+      const base = await import('./base-font.js');
+      fonts.push(
+        ...(await base.loadBaseFonts(
+          sourceDocument,
+          registerFont,
+          () => new RenderPDFError('FONT_LOAD_FAILED', 'Bundled base font could not be loaded.'),
+        )),
+      );
+      if (fontMismatch === 'fallback') fallbackFamily = base.BASE_FONT_FAMILY;
+    }
+    if (
+      fallbackFamily &&
+      !fonts.some((font) => font.family.toLowerCase() === fallbackFamily.toLowerCase())
+    ) {
+      throw new RenderPDFError(
+        'INVALID_OPTIONS',
+        `fontFallback requires a registered family: ${fallbackFamily}.`,
+      );
+    }
     // Custom HTML bands never enter BODY's display list; they share source fonts and CSS pixels.
     const resolvedHeader = resolveHtmlBand(sourceDocument, header, printableWidth);
     const resolvedFooter = resolveHtmlBand(sourceDocument, footer, printableWidth);
-    const substituted = fontFallback
-      ? substituteFonts(source, fonts, fontFallback) +
-        (resolvedHeader && 'element' in resolvedHeader
-          ? substituteFonts(resolvedHeader.element, fonts, fontFallback)
-          : 0) +
-        (resolvedFooter && 'element' in resolvedFooter
-          ? substituteFonts(resolvedFooter.element, fonts, fontFallback)
-          : 0)
-      : 0;
-    const substitutionWarning: RenderWarning | undefined = substituted
-      ? {
-          code: 'FONT_SUBSTITUTED',
-          message: `${substituted} copied HTML elements were relaid out with ${fontFallback} because their first CSS font family was not supplied.`,
+    const substituted = new Map<string, string>();
+    if (fallbackFamily) {
+      for (const sourceElement of [
+        source,
+        ...(resolvedHeader && 'element' in resolvedHeader ? [resolvedHeader.element] : []),
+        ...(resolvedFooter && 'element' in resolvedFooter ? [resolvedFooter.element] : []),
+      ]) {
+        for (const [requested, replacement] of substituteFonts(
+          sourceElement,
+          fonts,
+          fallbackFamily,
+        )) {
+          substituted.set(requested, replacement);
         }
-      : undefined;
+      }
+    }
+    const examples = [...substituted]
+      .slice(0, 3)
+      .map(([requested, replacement]) => `${requested} → ${replacement}`);
+    const remaining = substituted.size - examples.length;
+    const substitutionWarning: RenderWarning | undefined =
+      substituted.size > 0
+        ? Object.freeze({
+            code: 'FONT_SUBSTITUTED',
+            message: `${substituted.size} requested font face(s) were relaid out with a registered fallback face (${examples.join('; ')}${remaining > 0 ? `; ${remaining} more` : ''}).`,
+          })
+        : undefined;
     if (substitutionWarning) options.onWarning?.(substitutionWarning);
     const result = await renderPDF(source, {
       ...pdfOptions,
       fonts,
+      fontMismatch: 'error',
       ...(resolvedHeader ? { header: resolvedHeader } : {}),
       ...(resolvedFooter ? { footer: resolvedFooter } : {}),
     });
     if (!substitutionWarning) return result;
     return Object.freeze({
       ...result,
-      warnings: Object.freeze([Object.freeze(substitutionWarning), ...result.warnings]),
+      warnings: Object.freeze([substitutionWarning, ...result.warnings]),
     });
   } finally {
     frame.remove();

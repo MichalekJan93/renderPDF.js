@@ -35,6 +35,16 @@
             <button id="reset-example" class="button-secondary" type="button">Load example</button>
           </div>
 
+          <label for="example-select">Example document</label>
+          <select id="example-select" aria-describedby="example-help">
+            <option value="example-1">Example 1 · People directory</option>
+            <option value="example-2">Example 2 · Product catalog</option>
+          </select>
+          <p id="example-help" class="field-help">
+            Choosing an example replaces the editor and preview. Load example restores the selected
+            example after edits or an upload.
+          </p>
+
           <label for="html-file">Upload an HTML file</label>
           <input
             id="html-file"
@@ -58,6 +68,60 @@
             placeholder="<h1>My document</h1>"
           ></textarea>
 
+          <fieldset class="font-panel" aria-describedby="font-help">
+            <legend>Document font files</legend>
+            <p id="font-help" class="field-help">
+              Font files are optional. Register matching local TTF files to preserve the HTML font
+              in RenderPDF.js. Without a matching file, RenderPDF.js can use its base font and
+              report the substitution; the preview and PDF may then look different. Files stay in
+              this browser session.
+            </p>
+            <ul
+              id="font-requirements"
+              class="warnings"
+              aria-label="Document font availability"
+              hidden
+            ></ul>
+            <div class="font-fields">
+              <div>
+                <label for="font-family">CSS family</label>
+                <input
+                  id="font-family"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Times New Roman"
+                />
+              </div>
+              <div>
+                <label for="font-weight">Weight</label>
+                <input id="font-weight" type="number" min="100" max="900" step="100" value="400" />
+              </div>
+              <div>
+                <label for="font-style">Style</label>
+                <select id="font-style">
+                  <option value="normal">Normal</option>
+                  <option value="italic">Italic</option>
+                </select>
+              </div>
+            </div>
+            <label for="font-file">Matching TTF file</label>
+            <input id="font-file" type="file" accept=".ttf,font/ttf" />
+            <button id="register-font" class="button-secondary" type="button">Register font</button>
+            <p id="font-status" class="field-help" aria-live="polite"></p>
+            <ul id="registered-fonts" aria-label="Registered document fonts"></ul>
+          </fieldset>
+
+          <label for="font-mismatch">RenderPDF.js font mismatch</label>
+          <select id="font-mismatch" aria-describedby="font-mismatch-help">
+            <option value="fallback">Export with base font and report substitution</option>
+            <option value="error">Stop RenderPDF.js export with an error</option>
+          </select>
+          <p id="font-mismatch-help" class="field-help">
+            Applies when HTML requests a font without matching registered bytes. The RenderPDF.js
+            result reports FONT_SUBSTITUTED in fallback mode. jsPDF handles missing fonts
+            separately, so compare the downloaded PDFs as well as their times.
+          </p>
+
           <label class="checkbox-label" for="strict-css">
             <input id="strict-css" type="checkbox" />
             Reject omitted CSS effects
@@ -74,6 +138,25 @@
           <p id="page-break-help" class="field-help">
             Applies to RenderPDF.js. Turn this off to ignore forced breaks and keep-together hints.
             Pages fill the available space; table rows remain undivided.
+          </p>
+          <label for="source-verification">RenderPDF.js source verification</label>
+          <select id="source-verification" aria-describedby="verification-help">
+            <option value="mutations">Fast static HTML</option>
+            <option value="full">Full CSS guard</option>
+          </select>
+          <p id="verification-help" class="field-help">
+            Fast static HTML checks observed DOM and stylesheet mutations during export. It can miss
+            CSSOM edits and style-only changes, so use it only when other code is not changing the
+            preview. Full CSS guard also checks computed styles and geometry. This setting affects
+            RenderPDF.js timing; its warning appears below the results.
+          </p>
+          <label class="checkbox-label" for="profile-stages">
+            <input id="profile-stages" type="checkbox" aria-describedby="profile-help" />
+            Profile RenderPDF.js stages
+          </label>
+          <p id="profile-help" class="field-help">
+            Adds progress callbacks and scheduling overhead. Leave off for the regular timing
+            comparison.
           </p>
 
           <div class="actions">
@@ -104,7 +187,7 @@
                 </thead>
                 <tbody>
                   <tr id="render-result">
-                    <th>RenderPDF.js</th>
+                    <th id="render-label">RenderPDF.js · Fast static HTML</th>
                     <td>—</td>
                     <td>—</td>
                     <td>—</td>
@@ -120,18 +203,27 @@
                 </tbody>
               </table>
             </div>
+            <details id="render-profile" class="timing-profile" hidden>
+              <summary>RenderPDF.js stage timings</summary>
+              <dl id="render-phases"></dl>
+              <p>
+                Stage times are wall times between progress notifications. Other includes setup,
+                work between stages, callback scheduling, and final checks. Blob creation is
+                measured separately; all parts are included in the total above.
+              </p>
+            </details>
             <p id="winner" class="winner" aria-live="polite"></p>
           </section>
 
           <aside class="rendering-note" aria-label="Conversion settings">
             <strong>Comparison settings</strong>
             <p>
-              Both libraries receive the same preview with local Noto Sans fonts, A4 pages, and 24
-              CSS px margins. RenderPDF.js omits outer shadows and some table styles by default; the
-              rejection checkbox makes those effects fail instead. Timing includes conversion and
-              PDF serialization, excluding preview preparation and browser download handling.
-              Different rendering and pagination methods can change appearance and page count.
-              RenderPDF.js is experimental.
+              Both libraries receive the same preview and available registered font bytes, A4 pages,
+              and 24 CSS px margins. Missing fonts may be substituted differently. RenderPDF.js
+              omits outer shadows and some table styles by default; the rejection checkbox makes
+              those effects fail instead. Timing includes conversion and PDF serialization,
+              excluding preview preparation and browser download handling. Different rendering and
+              pagination methods can change appearance and page count. RenderPDF.js is experimental.
             </p>
           </aside>
         </section>

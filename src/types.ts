@@ -47,6 +47,26 @@ export interface TextOperation {
   invisible: boolean;
 }
 
+/** One browser-resolved elliptical corner radius in CSS pixels. */
+export interface CornerRadius {
+  /** Horizontal radius after CSS border-box overlap scaling. */
+  x: number;
+  /** Vertical radius after CSS border-box overlap scaling. */
+  y: number;
+}
+
+/** Four resolved border-box corners in browser paint order. */
+export interface RoundedCorners {
+  /** Top-left elliptical radius. */
+  topLeft: CornerRadius;
+  /** Top-right elliptical radius. */
+  topRight: CornerRadius;
+  /** Bottom-right elliptical radius. */
+  bottomRight: CornerRadius;
+  /** Bottom-left elliptical radius. */
+  bottomLeft: CornerRadius;
+}
+
 /** A supported axis-aligned box painted by native PDF operations. */
 export interface BoxOperation {
   /** Discriminant for ordered paint dispatch. */
@@ -59,6 +79,8 @@ export interface BoxOperation {
   borderColor: string;
   /** Uniform border width in CSS pixels. */
   borderWidth: number;
+  /** Resolved radii for a solid rounded box; absent for rectangular boxes. */
+  roundedCorners?: RoundedCorners;
 }
 
 /** One disjoint solid fill belonging to a resolved collapsed table border. */

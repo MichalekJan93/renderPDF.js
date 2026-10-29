@@ -38,6 +38,15 @@ function fontFaceCss(
   return `@font-face { font-family: "${font.family}"; font-weight: ${font.weight}; font-style: ${font.style}; src: url("data:font/${opentype ? 'otf' : 'ttf'};base64,${btoa(binary)}") format("${opentype ? 'opentype' : 'truetype'}"); }`;
 }
 
+/** Serialize registered font programs once for the raster captures in one export. */
+export function prepareRasterFontCss(
+  /** Exact browser/PDF font faces used by every captured subtree. */
+  fonts: readonly RegisteredFont[],
+): string {
+  // A local string avoids retaining font programs after the export finishes.
+  return fonts.map(fontFaceCss).join('\n');
+}
+
 /** Rejects image references that would require network access inside an SVG image. */
 function assertInlineResources(
   /** Computed style whose URL-valued properties html-to-image will clone. */
@@ -66,11 +75,15 @@ function assertSelfContained(
   fonts: readonly RegisteredFont[],
   /** Whether the selected root's outer shadow is removed from the capture clone. */
   omitOuterShadow: boolean,
+  /** Requested replacement face; raster capture cannot safely relayout its internal clone. */
+  fontFallback?: string,
 ): void {
   // Bounds permit inner clipping but reject descendants painted outside the capture.
   const rootBounds = element.getBoundingClientRect();
   // Include the region itself when checking resources and context-dependent effects.
   const descendants = [element, ...element.querySelectorAll('*')];
+  // Reuse one browser range to distinguish painted text from hidden descendants.
+  const textRange = element.ownerDocument.createRange();
   // Programmatic customized built-ins can serialize is= without exposing an is attribute.
   const nativePrototypes = new Map<string, object | null>();
   for (const descendant of descendants) {
@@ -215,11 +228,19 @@ function assertSelfContained(
       }
     }
 
-    // Check visible text nodes only; container font defaults do not create glyphs.
-    const hasOwnText = [...descendant.childNodes].some(
-      /** A direct text child whose face must exist inside the SVG image. */
-      (child) => child.nodeType === Node.TEXT_NODE && Boolean(child.textContent?.trim()),
-    );
+    // Hidden text creates neither raster pixels nor a font requirement.
+    const hasOwnText =
+      style.visibility === 'visible' &&
+      [...descendant.childNodes].some(
+        /** Only a laid-out direct text child can require a face in the SVG image. */
+        (child) => {
+          if (child.nodeType !== Node.TEXT_NODE || !child.textContent?.trim()) return false;
+          textRange.selectNodeContents(child);
+          return Array.from(textRange.getClientRects()).some(
+            (rectangle) => rectangle.width > 0 && rectangle.height > 0,
+          );
+        },
+      );
     if (hasOwnText) {
       if (!style.font) {
         throw new RenderPDFError(
@@ -228,7 +249,22 @@ function assertSelfContained(
         );
       }
       // One shared resolver keeps native and raster text on the same browser-selected face.
-      resolveRegisteredFont(style, fonts);
+      try {
+        resolveRegisteredFont(style, fonts);
+      } catch (error) {
+        if (
+          !(error instanceof RenderPDFError) ||
+          error.code !== 'MISSING_FONT' ||
+          fontFallback === undefined
+        )
+          throw error;
+        // html-to-image exposes no public descendant-clone style hook. Capturing the
+        // original CSS face would paint different glyphs from the fallback PDF text.
+        throw new RenderPDFError(
+          'RASTER_FAILED',
+          `Raster text requests an unavailable font. Capture cannot safely substitute ${fontFallback} without relayout; renderHTML relayouts an isolated copy, or provide the document font.`,
+        );
+      }
     }
 
     // Ignore hidden descendants, whose zero geometry cannot escape the capture.
@@ -271,6 +307,10 @@ export async function captureRaster(
   } = { x: 0, y: 0 },
   /** Remove only this raster root's unsupported outer shadow in the cloned image. */
   omitOuterShadow = false,
+  /** Font CSS prepared once by the caller, or omitted for an independent capture. */
+  preparedFontCss?: string,
+  /** Selected fallback face; mismatched raster text must fail rather than paint unrelated pixels. */
+  fontFallback?: string,
 ): Promise<Uint8Array> {
   if (!element.isConnected || !element.ownerDocument.defaultView) {
     throw new RenderPDFError(
@@ -318,14 +358,14 @@ export async function captureRaster(
     );
   }
 
-  assertSelfContained(element, fonts, omitOuterShadow);
+  assertSelfContained(element, fonts, omitOuterShadow, fontFallback);
   // Keep inset layers while dropping any shadow that paints outside the selected border box.
   const insetShadows = computedStyle(element)
     .boxShadow.split(/,(?![^(]*\))/)
     .filter((shadow) => /\binset\b/.test(shadow))
     .join(', ');
   // Supplying fontEmbedCSS bypasses stylesheet scanning and external font requests.
-  const fontEmbedCSS = fonts.map(fontFaceCss).join('\n');
+  const fontEmbedCSS = preparedFontCss ?? prepareRasterFontCss(fonts);
   // html-to-image 1.11.13 floors font-size and subtracts 0.1px; copy the exact font shorthand first instead.
   // Upstream behavior: https://github.com/bubkoo/html-to-image/blob/v1.11.13/src/clone-node.ts#L139-L143
   const includeStyleProperties = [

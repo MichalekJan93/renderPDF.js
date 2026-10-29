@@ -1,7 +1,11 @@
 import { RenderPDFError, type RenderWarning } from './diagnostics.js';
 import { computedStyle, isHtmlElement, isHtmlTag, isShadowRoot } from './dom.js';
-import { resolveRegisteredFont } from './fonts.js';
-import { assertAutomaticRasterBoundary, automaticRasterReason } from './planner.js';
+import { resolveRegisteredFont, selectFallbackFont } from './fonts.js';
+import {
+  assertAutomaticRasterBoundary,
+  automaticRasterReason,
+  nativeRoundedCorners,
+} from './planner.js';
 import {
   collapsedTableOwner,
   measureCollapsedTableBorders,
@@ -27,8 +31,14 @@ const strongGrapheme = /[\p{L}\p{N}]/u;
 
 /** Reuse exact loaded-face metrics within one synchronous measurement only. */
 interface TextMetricsCache {
+  /** Browser canvas used only for measured font ascent and descent. */
   context: CanvasRenderingContext2D;
+  /** Per-face metrics in CSS pixels during this synchronous snapshot. */
   fonts: Map<string, { ascent: number; descent: number }>;
+  /** Registered family used when requested CSS faces are unavailable. */
+  fallbackFamily?: string;
+  /** One diagnostic per distinct requested face, independent of repeated table rows. */
+  substitutions: Map<string, string>;
 }
 
 /** Translate viewport geometry into the single root-relative CSS pixel system.
@@ -48,6 +58,15 @@ function relativeBounds(rectangle: DOMRect, origin: DOMRect): Bounds {
     width: rectangle.width,
     height: rectangle.height,
   };
+}
+
+/** A transparent fill without a native border cannot change any PDF pixel.
+ * @param box Measured native box whose visible paint has already been validated.
+ */
+function isPaintlessBox(box: BoxOperation): boolean {
+  if (box.borderWidth !== 0 || !box.background.startsWith('rgba(')) return false;
+  // Chromium's computed rgba() form places the alpha component after the final comma.
+  return Number(box.background.slice(box.background.lastIndexOf(',') + 1, -1)) === 0;
 }
 
 /** Follow source ancestors across an isolated preview's shadow boundary.
@@ -73,6 +92,8 @@ function validateVectorStyle(
   collapsed = false,
   /** Whether unsupported decorative CSS is an error rather than an omitted effect. */
   strictCss = false,
+  /** Checked solid radius owned by the native box painter. */
+  nativeRounded = false,
 ): void {
   // Chromium clips replaced image content to its own box by default; fill embedding matches it.
   const replacedImage = isHtmlTag(element, 'img');
@@ -89,7 +110,7 @@ function validateVectorStyle(
     style.maskImage !== 'none' && 'mask-image',
     style.backgroundImage !== 'none' && !allowLocalRasterEffects && 'background-image',
     style.boxShadow !== 'none' && !allowLocalRasterEffects && strictCss && 'box-shadow',
-    style.borderRadius !== '0px' && !allowLocalRasterEffects && 'border-radius',
+    style.borderRadius !== '0px' && !allowLocalRasterEffects && !nativeRounded && 'border-radius',
     style.overflowX !== 'visible' && !(replacedImage && style.overflowX === 'clip') && 'overflow-x',
     style.overflowY !== 'visible' && !(replacedImage && style.overflowY === 'clip') && 'overflow-y',
     style.cssFloat !== 'none' && 'float',
@@ -233,7 +254,22 @@ function measureText(
   // All runs of this text node share the parent's computed font face.
   const style = computedStyle(parent);
   // Browser and PDF face selection share CSS weight matching without accepting unknown families.
-  const face = resolveRegisteredFont(style, fonts);
+  let face: RegisteredFont;
+  let substituted = false;
+  try {
+    face = resolveRegisteredFont(style, fonts);
+  } catch (error) {
+    if (
+      !(error instanceof RenderPDFError) ||
+      error.code !== 'MISSING_FONT' ||
+      cache.fallbackFamily === undefined
+    )
+      throw error;
+    face = selectFallbackFont(style, fonts, cache.fallbackFamily);
+    substituted = true;
+    const requested = `${style.fontFamily} ${style.fontWeight} ${style.fontStyle}`;
+    cache.substitutions.set(requested, `${face.family} ${face.weight} ${face.style}`);
+  }
   if (
     style.writingMode !== 'horizontal-tb' ||
     style.textTransform !== 'none' ||
@@ -300,42 +336,56 @@ function measureText(
     cache.fonts.set(fontDescription, metrics);
   }
   const { ascent, descent } = metrics;
-  // Grapheme boundaries preserve surrogate pairs and combining marks in every script.
-  const segments = graphemes.segment(node.data);
   // A reusable Range reads browser-produced geometry, not a synthetic line-breaking algorithm.
   const range = node.ownerDocument.createRange();
   // Line ranges are collected before their complete text and horizontal extent are measured.
   const lines: { start: number; end: number; top: number }[] = [];
-  // Each grapheme's visible rectangle identifies the line selected by browser layout.
-  for (const segment of segments) {
-    range.setStart(node, segment.index);
-    range.setEnd(node, segment.index + segment.segment.length);
-    // Collapsed whitespace produces empty rectangles and should not create phantom runs.
-    const rectangles = Array.from(range.getClientRects());
-    const rectangle = rectangles.find((item) => item.width > 0 && item.height > 0);
-    if (!rectangle) {
-      // Chromium can assign a ligature's entire width to an earlier text node.
-      if (
-        /[^\t\n\r\f ]/.test(segment.segment) &&
-        rectangles.some((item) => item.height > 0 && item.width === 0)
-      ) {
-        throw new RenderPDFError(
-          'UNSUPPORTED_CSS',
-          'Text shaping crosses an inline boundary or uses an unsupported zero-width glyph. Keep each shaped word in one text node.',
-        );
-      }
-      continue;
+  // A plain single text child of a table cell cannot shape across an inline-node boundary.
+  // One browser fragment proves it did not wrap; Unicode and fragmented text keep glyph checks.
+  if (
+    (isHtmlTag(parent, 'td') || isHtmlTag(parent, 'th')) &&
+    parent.childNodes.length === 1 &&
+    node.data.length > 1 &&
+    /^[\x20-\x7e]+$/.test(node.data)
+  ) {
+    range.selectNodeContents(node);
+    const fragments = Array.from(range.getClientRects());
+    if (fragments.length === 1 && fragments[0]!.width > 0 && fragments[0]!.height > 0) {
+      lines.push({ start: 0, end: node.data.length, top: fragments[0]!.top });
     }
-    // Adjacent visible glyphs with matching tops belong to one browser line.
-    const previous = lines.at(-1);
-    if (previous && Math.abs(previous.top - rectangle.top) < 0.5) {
-      previous.end = segment.index + segment.segment.length;
-    } else {
-      lines.push({
-        start: segment.index,
-        end: segment.index + segment.segment.length,
-        top: rectangle.top,
-      });
+  }
+  if (lines.length === 0) {
+    // Grapheme boundaries preserve surrogate pairs, combining marks and zero-width diagnostics.
+    for (const segment of graphemes.segment(node.data)) {
+      range.setStart(node, segment.index);
+      range.setEnd(node, segment.index + segment.segment.length);
+      // Collapsed whitespace produces empty rectangles and should not create phantom runs.
+      const rectangles = Array.from(range.getClientRects());
+      const rectangle = rectangles.find((item) => item.width > 0 && item.height > 0);
+      if (!rectangle) {
+        // Chromium can assign a ligature's entire width to an earlier text node.
+        if (
+          /[^\t\n\r\f ]/.test(segment.segment) &&
+          rectangles.some((item) => item.height > 0 && item.width === 0)
+        ) {
+          throw new RenderPDFError(
+            'UNSUPPORTED_CSS',
+            'Text shaping crosses an inline boundary or uses an unsupported zero-width glyph. Keep each shaped word in one text node.',
+          );
+        }
+        continue;
+      }
+      // Adjacent visible glyphs with matching tops belong to one browser line.
+      const previous = lines.at(-1);
+      if (previous && Math.abs(previous.top - rectangle.top) < 0.5) {
+        previous.end = segment.index + segment.segment.length;
+      } else {
+        lines.push({
+          start: segment.index,
+          end: segment.index + segment.segment.length,
+          top: rectangle.top,
+        });
+      }
     }
   }
   return lines.flatMap((line) => {
@@ -383,12 +433,18 @@ function measureText(
         return { text: piece.text, x: runBounds.x, width: runBounds.width };
       });
     });
+    // A fallback face can consume the original browser's gaps between separate words.
+    // Shape a left-to-right line with its spaces so extraction and visible spacing agree.
+    const paintRuns =
+      substituted && !rtlGrapheme.test(sourceLine)
+        ? [{ text, x: bounds.x, width: bounds.width }]
+        : runs;
     return [
       {
         kind: 'text' as const,
         bounds,
         text,
-        runs,
+        runs: paintRuns,
         baseline: bounds.y + (bounds.height - ascent - descent) / 2 + ascent,
         fontSize,
         family: face.family,
@@ -644,6 +700,8 @@ export function measurePreparedLayout(
     strictCss?: boolean;
     /** Reserve and replay a native THEAD on each body continuation page. */
     repeatTableHeaders?: boolean;
+    /** Registered family selected when an authored face is unavailable. */
+    fontFallback?: string;
   } = {},
 ): LayoutSnapshot {
   // Capture the policy once; this path deliberately performs no asynchronous resource preparation.
@@ -666,7 +724,12 @@ export function measurePreparedLayout(
   if (!contextCandidate)
     throw new RenderPDFError('INVALID_SOURCE', 'Canvas font measurement is unavailable.');
   // Capture the checked context as a non-null value for the recursive visitor.
-  const cache: TextMetricsCache = { context: contextCandidate, fonts: new Map() };
+  const cache: TextMetricsCache = {
+    context: contextCandidate,
+    fonts: new Map(),
+    substitutions: new Map(),
+    ...(options.fontFallback ? { fallbackFamily: options.fontFallback } : {}),
+  };
   // The list's order is the paint order for this deliberately restricted static subset.
   const operations: PaintOperation[] = [];
   // Record native ownership only when the caller explicitly requests repeated table headers.
@@ -756,10 +819,13 @@ export function measurePreparedLayout(
     }
     // Explicit boundaries preserve the application's existing opt-in capture policy in either mode.
     const explicitRaster = !insideRaster && element.hasAttribute('data-raster');
+    // Only a single solid box may keep its rounded background and border as native paths.
+    const roundedCorners =
+      !insideRaster && !explicitRaster ? nativeRoundedCorners(element, style) : undefined;
     // Only the current element's effects can select its subtree; ordinary parents remain native.
     const automaticReason =
       !insideRaster && !explicitRaster && fallback === 'auto'
-        ? automaticRasterReason(style, strictCss)
+        ? automaticRasterReason(style, strictCss, roundedCorners !== undefined)
         : undefined;
     // Every descendant of an automatic region must retain native positioning and paint-order safety.
     const automatic = insideAutomatic || automaticReason !== undefined;
@@ -837,7 +903,14 @@ export function measurePreparedLayout(
         return;
       }
     } else if (!insideRaster) {
-      validateVectorStyle(element, style, false, collapsed !== undefined, strictCss);
+      validateVectorStyle(
+        element,
+        style,
+        false,
+        collapsed !== undefined,
+        strictCss,
+        roundedCorners !== undefined,
+      );
       validateDisplay(element, style);
       if (
         isHtmlTag(element, 'tr') ||
@@ -882,9 +955,13 @@ export function measurePreparedLayout(
               : style.backgroundColor,
           borderColor: style.borderTopColor,
           borderWidth: collapsed ? 0 : Number.parseFloat(style.borderTopWidth),
+          ...(roundedCorners ? { roundedCorners } : {}),
         };
-        operations.push(box);
-        if (repeatTableHeaders) elementBoxes.set(element, box);
+        // Keep only visible paint; transparent table cells still contribute text and atomic rows.
+        if (!isPaintlessBox(box)) {
+          operations.push(box);
+          if (repeatTableHeaders) elementBoxes.set(element, box);
+        }
       }
     }
     // Raster descendants retain semantic text without emitting duplicate visible boxes or images.
@@ -983,33 +1060,74 @@ export function measurePreparedLayout(
     }
   }
   visit(root, false);
+  if (cache.substitutions.size > 0) {
+    // The live DOM keeps its original layout; PDF glyph widths may therefore differ.
+    const examples = [...cache.substitutions]
+      .slice(0, 3)
+      .map(([requested, substitute]) => `${requested} → ${substitute}`);
+    const remaining = cache.substitutions.size - examples.length;
+    warnings.push({
+      code: 'FONT_SUBSTITUTED',
+      message: `${cache.substitutions.size} requested font face(s) used a registered fallback face in PDF (${examples.join('; ')}${remaining > 0 ? `; ${remaining} more` : ''}). The live source was not relaid out, so glyph widths and wrapping may differ from its browser view.`,
+    });
+  }
   // Element-only sibling checks cannot detect a direct text node overlapping a later block.
   const earlierText: TextOperation[] = [];
+  // Native table borders are appended after cell text; vertical buckets keep checks local.
+  const textByVerticalBucket = new Map<number, TextOperation[]>();
+  // Very tall text spans use one separate list rather than filling an unbounded bucket range.
+  const tallText: TextOperation[] = [];
+  // Geometry remains in CSS pixels; this index changes only candidate selection.
+  const overlapBucketHeight = 64;
+  // Beyond this many buckets, a linear scan is cheaper and keeps indexing bounded.
+  const maxOverlapBuckets = 32;
   for (const operation of operations) {
     if (operation.kind === 'text') {
-      if (!operation.invisible) earlierText.push(operation);
+      if (!operation.invisible) {
+        earlierText.push(operation);
+        const firstBucket = Math.floor(operation.bounds.y / overlapBucketHeight);
+        const lastBucket = Math.floor(
+          (operation.bounds.y + operation.bounds.height) / overlapBucketHeight,
+        );
+        if (lastBucket - firstBucket > maxOverlapBuckets) {
+          tallText.push(operation);
+        } else {
+          for (let bucket = firstBucket; bucket <= lastBucket; bucket += 1) {
+            const candidates = textByVerticalBucket.get(bucket) ?? [];
+            candidates.push(operation);
+            textByVerticalBucket.set(bucket, candidates);
+          }
+        }
+      }
       continue;
     }
-    if (operation.kind === 'box') {
-      // Fully transparent boxes without a border cannot obscure previously emitted text.
-      const alpha = operation.background.startsWith('rgba(')
-        ? Number(operation.background.slice(operation.background.lastIndexOf(',') + 1, -1))
-        : 1;
-      if (alpha === 0 && operation.borderWidth === 0) continue;
-    }
+    // Fully transparent boxes without a border cannot obscure earlier text.
+    if (operation.kind === 'box' && isPaintlessBox(operation)) continue;
     // Browser block backgrounds and inline content have separate paint phases beyond DFS order.
     const bounds = operation.bounds;
-    if (
-      earlierText.some(
-        (text) =>
-          Math.min(text.bounds.x + text.bounds.width, bounds.x + bounds.width) -
-            Math.max(text.bounds.x, bounds.x) >
-            0.1 &&
-          Math.min(text.bounds.y + text.bounds.height, bounds.y + bounds.height) -
-            Math.max(text.bounds.y, bounds.y) >
-            0.1,
-      )
-    ) {
+    /** Keep the original exact rectangle predicate after selecting nearby text. */
+    function overlaps(text: TextOperation): boolean {
+      return (
+        Math.min(text.bounds.x + text.bounds.width, bounds.x + bounds.width) -
+          Math.max(text.bounds.x, bounds.x) >
+          0.1 &&
+        Math.min(text.bounds.y + text.bounds.height, bounds.y + bounds.height) -
+          Math.max(text.bounds.y, bounds.y) >
+          0.1
+      );
+    }
+    const firstBucket = Math.floor(bounds.y / overlapBucketHeight);
+    const lastBucket = Math.floor((bounds.y + bounds.height) / overlapBucketHeight);
+    let overlapping: boolean;
+    if (lastBucket - firstBucket > maxOverlapBuckets) {
+      overlapping = earlierText.some(overlaps);
+    } else {
+      overlapping = tallText.some(overlaps);
+      for (let bucket = firstBucket; !overlapping && bucket <= lastBucket; bucket += 1) {
+        overlapping = (textByVerticalBucket.get(bucket) ?? []).some(overlaps);
+      }
+    }
+    if (overlapping) {
       throw new RenderPDFError(
         'UNSUPPORTED_CSS',
         'Text overlaps later visible paint whose CSS paint phases cannot be represented safely; use an explicit containing raster region.',

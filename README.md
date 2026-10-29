@@ -105,43 +105,76 @@ a dependency of this library.
 
 ## HTML usage
 
-Register a font, select an existing element and export it:
+Select a connected element and export it. Font files are optional:
 
 ```ts
-import { registerFont, renderPDF } from 'renderpdf-js';
-
-// Supply a licensed static TTF/OTF file from your application.
-const response = await fetch('/fonts/MyFont-Regular.ttf');
-if (!response.ok) throw new Error('The document font could not be loaded.');
-
-const regular = await registerFont({
-  family: 'Document Sans',
-  data: await response.arrayBuffer(),
-});
+import { renderPDF } from 'renderpdf-js';
 
 const source = document.querySelector<HTMLElement>('#invoice');
 if (!source) throw new Error('Invoice element was not found.');
-source.style.fontFamily = 'Document Sans';
 
 const pdf = await renderPDF(source, {
-  fonts: [regular],
   format: 'A4',
   margin: 24,
 });
 
+for (const warning of pdf.warnings) {
+  if (warning.code === 'FONT_SUBSTITUTED') console.warn(warning.message);
+}
 await pdf.download('invoice.pdf');
 ```
 
-Register every font family and style used by the source, including italic faces.
+Without `fonts`, the library bundles the licensed `RenderPDF Base` Noto Sans
+regular, bold and italic faces ([SIL OFL license](assets/NotoSans-OFL.txt)).
+If the source requests a face outside this base family or its available
+weights and styles, export continues and returns a `FONT_SUBSTITUTED` warning
+in both `pdf.warnings` and `onWarning`. This is a diagnostic for the application,
+not a thrown error.
+
+A connected source keeps its browser layout: substituted PDF glyph widths and
+wrapping can differ from the visible element. Use `renderHTML` when a copied
+document may be laid out again with the substitute face. If a substituted
+text node is inside a raster region, direct `renderPDF` rejects with
+`RASTER_FAILED` instead of combining a bitmap in the original font with PDF
+text in the substitute font; `renderHTML` can relayout its isolated copy.
+
+For `renderPDF`, the bundled fallback registers up to three reusable `FontFace`
+objects in the source document's `FontFaceSet` for that document's lifetime;
+the source DOM is unchanged. `renderHTML` owns a temporary iframe and releases
+its font registrations when the export finishes.
+
+For exact font output, supply licensed TTF/OTF bytes and ensure the source CSS
+uses the same family. Choose `fontMismatch: 'error'` to reject any missing face:
+
+```ts
+import { registerFont, renderPDF } from 'renderpdf-js';
+
+const source = document.querySelector<HTMLElement>('#invoice');
+if (!source) throw new Error('Invoice element was not found.');
+const response = await fetch('/fonts/MyFont-Regular.ttf');
+if (!response.ok) throw new Error('The document font could not be loaded.');
+const regular = await registerFont({
+  family: 'Document Sans',
+  data: await response.arrayBuffer(),
+});
+const pdf = await renderPDF(source, {
+  fonts: [regular],
+  fontMismatch: 'error',
+});
+```
+
+Register every family and style used by the source, including italic faces.
 Available static weights follow CSS nearest-face matching: a requested weight of
-`600` can select a registered `700` face. The first computed CSS font family must
-still match a registered family. TTF/OTF data can be bytes, bare base64 or a font
-data URL. Variable TTF files are supported only at their upright default axes and
-declared default weight; other axis values, system fonts, WOFF/WOFF2 and font
-collections remain unsupported. Disable optical sizing for a variable font with
-an `opsz` axis so browser and PDF outlines use the same instance.
-The selected face must contain every character in its text run; there is no
-automatic per-glyph fallback. A missing character fails with `MISSING_GLYPH`.
+`600` can select a registered `700` face. A regular-only family does not silently
+stand in for bold or italic text: strict mode throws `MISSING_FONT`, while
+fallback mode reports `FONT_SUBSTITUTED`. TTF/OTF data can be bytes, bare base64
+or a font data URL. Variable TTF files are supported only at their upright
+default axes and declared default weight; other axis values, system fonts,
+WOFF/WOFF2 and font collections remain unsupported. Disable optical sizing for
+a variable font with an `opsz` axis so browser and PDF outlines use the same
+instance. The selected face must contain every character in its text run;
+there is no automatic per-glyph fallback. A missing character fails with
+`MISSING_GLYPH`, even in font fallback mode.
 
 Keep the source connected and unchanged during export. `registerFont({ ..., document:
 source.ownerDocument })` registers a face in an iframe's own `FontFaceSet`; the same
@@ -151,6 +184,11 @@ pixels** for A4 with default margins). `fit: 'width'` instead keeps the browser'
 original wrapping and uniformly reduces PDF paint and page mapping.
 
 ### Convert an HTML string
+
+`renderHTML(fullHtmlDocument)` also works without font files. It creates a
+temporary isolated document and lays it out with the bundled base face when a
+requested CSS family is unavailable. To supply exact fonts, page bands and
+layout options:
 
 ```ts
 import { renderHTML } from 'renderpdf-js';
@@ -169,11 +207,11 @@ const pdf = await renderHTML(fullHtmlDocument, {
 The default `isolation: 'iframe'` accepts a full HTML document. Use
 `isolation: 'shadow'` for a fragment. Both run in a temporary sandboxed iframe;
 their DOM and font faces are released after export. `sourceWidth` is the browser
-layout width before PDF fitting. `fontFallback` explicitly lays out copied
-elements whose first computed family is unregistered and reports
-`FONT_SUBSTITUTED`; it changes their appearance, so it cannot preserve an
-unprovided system font such as Tahoma. HTML header/footer fragments live in
-separate shadow roots: include their CSS inline or in each fragment. Scripts,
+layout width before PDF fitting. In fallback mode, `renderHTML` changes the
+copied elements' CSS family before browser layout and reports `FONT_SUBSTITUTED`.
+This cannot preserve an unprovided system font such as Tahoma. With supplied
+fonts, `fontFallback` selects a registered substitute family. HTML header/footer
+fragments live in separate shadow roots: include their CSS inline or in each fragment. Scripts,
 frames, templates, customized built-ins, active attributes and refresh metadata
 are rejected. Ordinary image and CSS URLs may still trigger browser requests.
 
@@ -212,45 +250,51 @@ Required values have no implicit substitute.
 
 ### `renderPDF(element, options)`
 
-| Name                 | Info                                                                                            | Allowed settings                                                                                                      | Default setting                               |
-| -------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `element`            | Existing browser layout. Keep it connected and stable until completion.                         | Positive-size `HTMLElement`, including one in an accessible same-origin iframe.                                       | Required.                                     |
-| `fonts`              | Exact faces used by source text and page bands.                                                 | Nonempty array of `registerFont()` handles belonging to the source document.                                          | Required; no system-font discovery.           |
-| `format`             | Paper size including margins.                                                                   | `'A4'`, `'A3'`, `'Letter'`, or `{ width, height }` with finite positive CSS-pixel dimensions.                         | `'A4'`.                                       |
-| `orientation`        | Selects paper axes without reflowing the source.                                                | `'portrait'`, `'landscape'`, or `'auto'` based on measured source width.                                              | `'portrait'`.                                 |
-| `margin`             | Empty edges; must leave a positive content area.                                                | Finite nonnegative number, or `{ top, right, bottom, left }` in CSS pixels.                                           | `24` on each edge.                            |
-| `fit`                | Uniformly shrinks wide content and page mapping, retaining browser wrapping.                    | `'none'` or `'width'`.                                                                                                | `'none'`; excess width rejects.               |
-| `pageBreak`          | Controls supported authored CSS fragmentation hints.                                            | `'css'` or `'auto'` for geometry alone.                                                                               | `'css'`.                                      |
-| `repeatTableHeaders` | Repeats supported native `thead` on continuation pages.                                         | `true` or `false`.                                                                                                    | `false`.                                      |
-| `header`             | Reserves an additional repeated band above body content.                                        | Text line, text slots or connected HTML; see band fields below.                                                       | Omitted.                                      |
-| `footer`             | Reserves an additional repeated band below body content.                                        | Same forms as `header`.                                                                                               | Omitted.                                      |
-| `fallback`           | Controls automatic selection of safe local raster regions.                                      | `'auto'` or `'strict'`; strict requires explicit `data-raster` for effects needing capture.                           | `'auto'`.                                     |
-| `strictCss`          | Rejects selected unsupported decoration instead of omitting it; independent of raster planning. | `true` or `false`. Default omission covers outer shadows and unsupported table-part backgrounds.                      | `false`.                                      |
-| `rasterScale`        | Raster pixels per CSS pixel in local regions.                                                   | Finite positive number, also bounded by each capture's dimensions and pixel budget.                                   | `2`.                                          |
-| `verifySource`       | Checks that source styles and geometry stay stable.                                             | `'full'` or `'mutations'`; mutations skips CSSOM/computed-style fingerprints and emits `SOURCE_VERIFICATION_REDUCED`. | `'full'`.                                     |
-| `metadata`           | Copies PDF document properties before asynchronous work.                                        | Metadata object below.                                                                                                | Title `'RenderPDF.js'`; other fields omitted. |
-| `signal`             | Cooperative cancellation between export stages.                                                 | `AbortSignal`.                                                                                                        | Omitted.                                      |
-| `onWarning`          | Observes diagnostic records also retained in the result.                                        | Synchronous `(warning: RenderWarning) => void`.                                                                       | Omitted; no console logging.                  |
-| `onProgress`         | Reports stage-local work counts, not elapsed-time percentages.                                  | Synchronous `({ stage, completed, total }) => void`.                                                                  | Omitted.                                      |
+| Name                 | Info                                                                                            | Allowed settings                                                                                                      | Default setting                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `element`            | Existing browser layout. Keep it connected and stable until completion.                         | Positive-size `HTMLElement`, including one in an accessible same-origin iframe.                                       | Required.                                                               |
+| `fonts`              | Exact faces used by source text and page bands.                                                 | Array of `registerFont()` handles belonging to the source document.                                                   | Bundled `RenderPDF Base` Noto Sans faces.                               |
+| `fontMismatch`       | Missing CSS face policy; fallback returns `FONT_SUBSTITUTED`, error throws `MISSING_FONT`.      | `'fallback'` or `'error'`.                                                                                            | `'fallback'` without fonts or with `fontFallback`; otherwise `'error'`. |
+| `fontFallback`       | Preferred substitute family in fallback mode; direct DOM layout remains unchanged.              | Family included in `fonts`, or bundled `RenderPDF Base`.                                                              | Bundled `RenderPDF Base` when fallback is selected.                     |
+| `format`             | Paper size including margins.                                                                   | `'A4'`, `'A3'`, `'Letter'`, or `{ width, height }` with finite positive CSS-pixel dimensions.                         | `'A4'`.                                                                 |
+| `orientation`        | Selects paper axes without reflowing the source.                                                | `'portrait'`, `'landscape'`, or `'auto'` based on measured source width.                                              | `'portrait'`.                                                           |
+| `margin`             | Empty edges; must leave a positive content area.                                                | Finite nonnegative number, or `{ top, right, bottom, left }` in CSS pixels.                                           | `24` on each edge.                                                      |
+| `fit`                | Uniformly shrinks wide content and page mapping, retaining browser wrapping.                    | `'none'` or `'width'`.                                                                                                | `'none'`; excess width rejects.                                         |
+| `pageBreak`          | Controls supported authored CSS fragmentation hints.                                            | `'css'` or `'auto'` for geometry alone.                                                                               | `'css'`.                                                                |
+| `repeatTableHeaders` | Repeats supported native `thead` on continuation pages.                                         | `true` or `false`.                                                                                                    | `false`.                                                                |
+| `header`             | Reserves an additional repeated band above body content.                                        | Text line, text slots or connected HTML; see band fields below.                                                       | Omitted.                                                                |
+| `footer`             | Reserves an additional repeated band below body content.                                        | Same forms as `header`.                                                                                               | Omitted.                                                                |
+| `fallback`           | Controls automatic selection of safe local raster regions.                                      | `'auto'` or `'strict'`; strict requires explicit `data-raster` for effects needing capture.                           | `'auto'`.                                                               |
+| `strictCss`          | Rejects selected unsupported decoration instead of omitting it; independent of raster planning. | `true` or `false`. Default omission covers outer shadows and unsupported table-part backgrounds.                      | `false`.                                                                |
+| `rasterScale`        | Raster pixels per CSS pixel in local regions.                                                   | Finite positive number, also bounded by each capture's dimensions and pixel budget.                                   | `2`.                                                                    |
+| `verifySource`       | Checks that source styles and geometry stay stable.                                             | `'full'` or `'mutations'`; mutations skips CSSOM/computed-style fingerprints and emits `SOURCE_VERIFICATION_REDUCED`. | `'full'`.                                                               |
+| `metadata`           | Copies PDF document properties before asynchronous work.                                        | Metadata object below.                                                                                                | Title `'RenderPDF.js'`; other fields omitted.                           |
+| `signal`             | Cooperative cancellation between export stages.                                                 | `AbortSignal`.                                                                                                        | Omitted.                                                                |
+| `onWarning`          | Observes diagnostic records also retained in the result.                                        | Synchronous `(warning: RenderWarning) => void`.                                                                       | Omitted; no console logging.                                            |
+| `onProgress`         | Reports stage-local work counts, not elapsed-time percentages.                                  | Synchronous `({ stage, completed, total }) => void`.                                                                  | Omitted.                                                                |
 
 `strictCss: false` does not promise support for arbitrary CSS. Supported table
-borders still render natively. Unsafe layout, missing fonts/glyphs and invalid
-resources still reject. Set `strictCss: true` when omitted decoration must fail.
-Use `fallback` separately to control local raster planning.
+borders still render natively. Unsafe layout, missing glyphs and invalid
+resources still reject. Missing CSS faces reject in `fontMismatch: 'error'` mode;
+fallback mode reports the substituted face and keeps caller-owned DOM layout.
+Substituted text inside a raster region rejects with `RASTER_FAILED` for a
+connected source; use `renderHTML` to relayout a copy before raster capture.
+Set `strictCss: true` when omitted decoration must fail. Use `fallback`
+separately to control local raster planning.
 
 ### `renderHTML(html, options)`
 
 Accepts the `renderPDF` settings above, with these differences and additions.
 The temporary isolated document and its font faces are released after export.
 
-| Name               | Info                                                                                        | Allowed settings                                                             | Default setting                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `html`             | HTML to parse and lay out. Active markup rejects.                                           | Nonempty HTML string; full document in iframe mode, fragment in shadow mode. | Required.                                                                            |
-| `fonts`            | Programs registered inside the temporary document.                                          | Nonempty array of font sources below, without `document`.                    | Required.                                                                            |
-| `isolation`        | Document parsing or shadow-root fragment; both use a sandboxed iframe.                      | `'iframe'` or `'shadow'`.                                                    | `'iframe'`.                                                                          |
-| `sourceWidth`      | Browser layout width before PDF fitting.                                                    | Finite positive CSS-pixel number, at most `32768`.                           | Printable width rounded down; `'auto'` orientation uses portrait for initial layout. |
-| `fontFallback`     | Relayouts copied elements whose first CSS family is unregistered; emits `FONT_SUBSTITUTED`. | A family supplied in `fonts`.                                                | Omitted; no substitution.                                                            |
-| `header`, `footer` | Repeated bands in the isolated document.                                                    | Text line or slots without a `font` handle, or `{ html, height }`.           | Omitted.                                                                             |
+| Name               | Info                                                                                                          | Allowed settings                                                             | Default setting                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `html`             | HTML to parse and lay out. Active markup rejects.                                                             | Nonempty HTML string; full document in iframe mode, fragment in shadow mode. | Required.                                                                            |
+| `fonts`            | Programs registered inside the temporary document.                                                            | Array of font sources below, without `document`.                             | Bundled `RenderPDF Base` Noto Sans faces.                                            |
+| `isolation`        | Document parsing or shadow-root fragment; both use a sandboxed iframe.                                        | `'iframe'` or `'shadow'`.                                                    | `'iframe'`.                                                                          |
+| `sourceWidth`      | Browser layout width before PDF fitting.                                                                      | Finite positive CSS-pixel number, at most `32768`.                           | Printable width rounded down; `'auto'` orientation uses portrait for initial layout. |
+| `fontFallback`     | Selects a substitute family in fallback mode; copied elements are laid out again and emit `FONT_SUBSTITUTED`. | A family supplied in `fonts`, or bundled `RenderPDF Base`.                   | Bundled `RenderPDF Base` when fallback is selected.                                  |
+| `header`, `footer` | Repeated bands in the isolated document.                                                                      | Text line or slots without a `font` handle, or `{ html, height }`.           | Omitted.                                                                             |
 
 ### `registerFont(source)` and font sources
 
@@ -263,8 +307,8 @@ The temporary isolated document and its font faces are released after export.
 | `document` | Browser document whose `FontFaceSet` owns the registration. Not used by document drawing or accepted by `renderHTML` font sources. | `Document`, usually `element.ownerDocument`.                                            | Current browser document. |
 
 System fonts, WOFF/WOFF2, collections and nondefault variable axes are unsupported.
-Register every used face. Static weight selection follows CSS nearest-face
-matching within the registered family; missing glyphs still reject.
+Register every used face for exact output. Static weight selection follows CSS
+nearest-face matching within the registered family; missing glyphs still reject.
 
 ### Header and footer fields
 
@@ -406,19 +450,24 @@ console.log(pdf.pageCount, pdf.warnings);
 These output methods reuse the completed PDF. `RenderPDFError`, exported from the
 package, exposes a `code` and `message` for conversion failures. Warnings are
 available through `onWarning` for HTML exports and `pdf.warnings`. Unsupported
-input still fails explicitly when it cannot be represented safely. With the default
+input still fails explicitly when it cannot be represented safely. A missing CSS
+face throws `MISSING_FONT` in `fontMismatch: 'error'` mode; fallback mode returns
+`FONT_SUBSTITUTED` through the warning channels and completes if the substitute
+contains the required glyphs. `MISSING_GLYPH` remains an error in either mode.
+With the default
 `strictCss: false`, selected unsupported decoration is omitted as described above.
 
 ## Supported scope
 
 HTML rendering supports static blocks, inline content, nonoverlapping Flexbox and
 Grid layouts, horizontal text in the scripts listed below, solid backgrounds,
-rectangular borders and native tables with `rowspan` and `colspan`.
+uniform solid borders, simple rounded solid boxes and native tables with
+`rowspan` and `colspan`.
 
 ### Text and languages
 
 Horizontal HTML text is verified in Chromium with selectable PDF text for these
-scripts when the registered TTF/OTF font covers the characters used:
+scripts when the bundled or supplied font covers the characters used:
 
 - [x] Latin script, including diacritics
 - [x] Cyrillic script
@@ -439,10 +488,12 @@ service. Freshly fetched image bytes receive the same structural, dimension and
 PNG decompression checks as standalone image input. PNG/JPEG orientation in HTML
 must be absent or `1`; normalize rotated pixels before using an `<img>` element.
 
-Gradients, rounded corners, inline bitmap backgrounds, inset shadows and opacity
-can use local raster fallback on supported rectangular blocks. `data-raster`
-selects a region explicitly. Regions are captured once in paint order; descendant
-text gets an extraction layer where safe. Raster resources must be inline bitmaps;
+Simple rounded boxes with a solid background and uniform solid border are drawn
+as PDF paths, keeping descendant text selectable. Rounded boxes with other
+effects, gradients, inline bitmap backgrounds, inset shadows and opacity can use
+local raster fallback on supported rectangular blocks. `data-raster` selects a
+region explicitly. Regions are captured once in paint order; descendant text gets
+an extraction layer where safe. Raster resources must be inline bitmaps;
 responsive images (`<picture>`, `<source>` and `img[srcset]`), external resources,
 transforms and backdrop effects are unsupported. Outer shadows on native elements
 and selected raster roots are omitted by default; `strictCss: true` rejects them.

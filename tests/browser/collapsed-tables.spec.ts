@@ -5,6 +5,7 @@ import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 import { PDFDocument } from 'pdf-lib';
 import type { RegisteredFont, RenderProgress } from '../../src/index';
+import type { TextOperation } from '../../src/types';
 import type { InspectedPage } from './pdf-inspector';
 
 /** Load synthetic tables and register the same static face for browser and PDF text. */
@@ -157,6 +158,170 @@ test('collapsed shared borders preserve browser pixels, alpha, colspan and rowsp
   await writeFile(testInfo.outputPath('collapsed-browser.png'), PNG.sync.write(browserImage));
   await writeFile(testInfo.outputPath('collapsed-pdf.png'), PNG.sync.write(pdfImage));
   await writeFile(testInfo.outputPath('collapsed.pdf'), Buffer.from(evidence.bytes));
+});
+
+test('transparent table cells omit paintless boxes without losing native borders or text', async ({
+  page,
+}) => {
+  await loadFixture(page);
+  const source = page.locator('#collapsed');
+  const evidence = await page.evaluate(async () => {
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const layoutPath = '/src/layout.ts';
+    const layout = (await import(
+      /* @vite-ignore */ layoutPath
+    )) as typeof import('../../src/layout');
+    const root = document.querySelector<HTMLElement>('#collapsed')!;
+    // One colored cell proves visible boxes stay in paint order among transparent peers.
+    root.innerHTML =
+      '<table style="width:436px;table-layout:fixed;border-collapse:collapse;border:2px solid #142846"><tbody>' +
+      Array.from({ length: 8 }, (_, index) => {
+        const identifier = String(index + 1).padStart(3, '0');
+        return `<tr><td style="background:transparent">A${identifier}</td><td style="background:${index === 3 ? '#d4ecff' : 'transparent'}">B${identifier}</td></tr>`;
+      }).join('') +
+      '</tbody></table>';
+    const markup = root.outerHTML;
+    const origin = root.getBoundingClientRect();
+    const cells = root.querySelectorAll('td');
+    const transparent = cells[0]!.getBoundingClientRect();
+    const colored = cells[7]!.getBoundingClientRect();
+    const fonts = (window as unknown as { collapsedFonts: RegisteredFont[] }).collapsedFonts;
+    const result = await api.renderPDF(root, {
+      fonts,
+      format: { width: 500, height: 420 },
+      margin: 20,
+    });
+    // Inspect the internal display list independently of the public PDF result.
+    const snapshot = layout.measurePreparedLayout(root, fonts);
+    return {
+      bytes: Array.from(await result.toUint8Array()),
+      pageCount: result.pageCount,
+      markupPreserved: root.outerHTML === markup,
+      boxes: snapshot.operations.filter((operation) => operation.kind === 'box').length,
+      borders: snapshot.operations.filter((operation) => operation.kind === 'border').length,
+      probes: [transparent, colored].map((bounds) => ({
+        x: bounds.right - origin.left - 12,
+        y: bounds.top - origin.top + 12,
+      })),
+    };
+  });
+  expect(evidence.markupPreserved).toBe(true);
+  expect(evidence.pageCount).toBe(1);
+  expect(evidence.boxes).toBe(2);
+  expect(evidence.borders).toBeGreaterThan(0);
+  const pages = await inspect(page, evidence.bytes);
+  expect(pages).toHaveLength(1);
+  expect(pages[0]!.imagePaints).toBe(0);
+  expect(pageText(pages[0]!)).toBe(
+    Array.from({ length: 8 }, (_, index) => {
+      const identifier = String(index + 1).padStart(3, '0');
+      return `A${identifier}B${identifier}`;
+    }).join(''),
+  );
+  const browserImage = PNG.sync.read(await source.screenshot());
+  const rendered = PNG.sync.read(Buffer.from(pages[0]!.png.split(',')[1]!, 'base64'));
+  const pdfImage = new PNG({ width: browserImage.width, height: browserImage.height });
+  PNG.bitblt(rendered, pdfImage, 20, 20, browserImage.width, browserImage.height, 0, 0);
+  for (const probe of evidence.probes) {
+    expect(pixel(pdfImage, probe.x, probe.y)).toEqual(pixel(browserImage, probe.x, probe.y));
+  }
+});
+
+test('ASCII table text still uses measured browser line fragments when it wraps', async ({
+  page,
+}) => {
+  await loadFixture(page);
+  const evidence = await page.evaluate(async () => {
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const layoutPath = '/src/layout.ts';
+    const layout = (await import(
+      /* @vite-ignore */ layoutPath
+    )) as typeof import('../../src/layout');
+    const root = document.querySelector<HTMLElement>('#collapsed')!;
+    root.innerHTML =
+      '<table style="width:220px;table-layout:fixed;border-collapse:collapse"><tbody><tr>' +
+      '<td id="wrapped-cell">NARROW CELL CONTENT WRAPS INTO SEVERAL LINES</td>' +
+      '<td>END001</td></tr></tbody></table>';
+    const cell = root.querySelector<HTMLElement>('#wrapped-cell')!;
+    const adjacent = cell.nextElementSibling!.getBoundingClientRect();
+    const origin = root.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    const browserLines = Array.from(range.getClientRects()).filter(
+      (rectangle) => rectangle.width > 0 && rectangle.height > 0,
+    );
+    const fonts = (window as unknown as { collapsedFonts: RegisteredFont[] }).collapsedFonts;
+    const snapshot = layout.measurePreparedLayout(root, fonts);
+    const measuredLines = snapshot.operations.filter(
+      (operation): operation is TextOperation =>
+        operation.kind === 'text' && operation.bounds.x < adjacent.left - origin.left - 0.1,
+    );
+    const result = await api.renderPDF(root, {
+      fonts,
+      format: { width: 500, height: 420 },
+      margin: 20,
+    });
+    return {
+      bytes: Array.from(await result.toUint8Array()),
+      browserLineCount: browserLines.length,
+      measuredLineCount: measuredLines.length,
+      measuredText: measuredLines.map((line) => line.text).join(' '),
+    };
+  });
+  expect(evidence.browserLineCount).toBeGreaterThan(1);
+  expect(evidence.measuredLineCount).toBe(evidence.browserLineCount);
+  expect(evidence.measuredText.replace(/\s+/g, '')).toBe('NARROWCELLCONTENTWRAPSINTOSEVERALLINES');
+  const pages = await inspect(page, evidence.bytes);
+  expect(pages).toHaveLength(1);
+  expect(pageText(pages[0]!)).toBe('NARROWCELLCONTENTWRAPSINTOSEVERALLINESEND001');
+});
+
+test('later paint overlapping text across a vertical bucket boundary still rejects', async ({
+  page,
+}) => {
+  await loadFixture(page);
+  const evidence = await page.evaluate(async () => {
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const root = document.querySelector<HTMLElement>('#collapsed')!;
+    // Zero line-height lets the later block cover direct text without overlapping sibling boxes.
+    root.style.lineHeight = '0px';
+    root.style.paddingTop = '0px';
+    root.innerHTML = 'MMMM<div style="height:40px;background:#d4ecff"></div>';
+    const range = document.createRange();
+    range.selectNode(root.firstChild!);
+    const initial = range.getBoundingClientRect();
+    const originalTop = initial.top - root.getBoundingClientRect().top;
+    // Place the same glyph rectangle across the 64 px indexing boundary.
+    root.style.paddingTop = `${63.5 - originalTop}px`;
+    const final = range.getBoundingClientRect();
+    const origin = root.getBoundingClientRect();
+    const later = root.querySelector('div')!.getBoundingClientRect();
+    let errorCode = 'NO_ERROR';
+    try {
+      await api.renderPDF(root, {
+        fonts: (window as unknown as { collapsedFonts: RegisteredFont[] }).collapsedFonts,
+        format: { width: 500, height: 420 },
+        margin: 20,
+      });
+    } catch (error) {
+      errorCode = error instanceof api.RenderPDFError ? error.code : '';
+    }
+    return {
+      errorCode,
+      textTop: final.top - origin.top,
+      textBottom: final.bottom - origin.top,
+      laterTop: later.top - origin.top,
+      laterBottom: later.bottom - origin.top,
+    };
+  });
+  expect(evidence.textTop).toBeLessThan(64);
+  expect(evidence.textBottom).toBeGreaterThan(64);
+  expect(evidence.textBottom).toBeGreaterThan(evidence.laterTop);
+  expect(evidence.laterBottom).toBeGreaterThan(evidence.textTop);
+  expect(evidence.errorCode).toBe('UNSUPPORTED_CSS');
 });
 
 test('RTL collapsed table gives an equal shared border to the right cell', async ({ page }) => {

@@ -9,10 +9,22 @@ function compact(text: string): string {
   return text.replace(/\s+/g, '');
 }
 
+/** Give synthetic snippets an explicit bundled face without changing tested HTML behavior. */
+function withSampleFont(
+  /** Static HTML fragment supplied through the public editor or upload control. */
+  html: string,
+): string {
+  return `<style>body { font-family: 'Playground Sans'; }</style>${html}`;
+}
+
 /** Independently inspect the actual download without importing the converter source.
  * @param bytes Complete bytes written by the browser's download action.
  */
-async function inspectPdf(bytes: Uint8Array): Promise<{
+async function inspectPdf(
+  bytes: Uint8Array,
+  /** Skip graphics decoding for large text-only extraction checks. */
+  inspectGraphics = true,
+): Promise<{
   texts: string[];
   imagePaints: number;
   /** Encoded bitmap dimensions in physical pixels, independent of page size. */
@@ -47,19 +59,21 @@ async function inspectPdf(bytes: Uint8Array): Promise<{
         const firstText = content.items.find((item) => 'str' in item && item.str.trim());
         if (firstText && 'transform' in firstText) firstTextX = firstText.transform[4]!;
       }
-      const operators = await page.getOperatorList();
       // Marked-content entries do not contribute printable Unicode characters.
       texts.push(content.items.map((item) => ('str' in item ? item.str : '')).join(''));
-      // Inline and named images both represent visible local raster paints.
-      imagePaints += operators.fnArray.filter(
-        (operation) =>
-          operation === OPS.paintImageXObject || operation === OPS.paintInlineImageXObject,
-      ).length;
-      for (const [index, operation] of operators.fnArray.entries()) {
-        if (operation === OPS.paintImageXObject || operation === OPS.paintInlineImageXObject) {
-          // Named image operands provide their encoded width and height after the object identifier.
-          const operands = operators.argsArray[index] as unknown[];
-          imageSizes.push({ width: Number(operands[1]), height: Number(operands[2]) });
+      if (inspectGraphics) {
+        const operators = await page.getOperatorList();
+        // Inline and named images both represent visible local raster paints.
+        imagePaints += operators.fnArray.filter(
+          (operation) =>
+            operation === OPS.paintImageXObject || operation === OPS.paintInlineImageXObject,
+        ).length;
+        for (const [index, operation] of operators.fnArray.entries()) {
+          if (operation === OPS.paintImageXObject || operation === OPS.paintInlineImageXObject) {
+            // Named image operands provide their encoded width and height after the object identifier.
+            const operands = operators.argsArray[index] as unknown[];
+            imageSizes.push({ width: Number(operands[1]), height: Number(operands[2]) });
+          }
         }
       }
       page.cleanup();
@@ -78,7 +92,7 @@ test('fresh full HTML compares two downloads while preserving RenderPDF.js text 
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   await page.goto('/', { waitUntil: 'networkidle' });
-  // Export becomes available only after all exact font programs are registered.
+  // The initial authored example has matching bundled faces and can export immediately.
   const downloadButton = page.locator('#export-pdfs');
   await expect(downloadButton).toBeEnabled();
   // The initial example must not leak into an immediately requested replacement export.
@@ -90,7 +104,7 @@ test('fresh full HTML compares two downloads while preserving RenderPDF.js text 
   const html = `<!doctype html>
     <html lang="en"><head><title>Private title outside the PDF</title><style>
       :root { --accent: #5b2158; }
-      body { margin: 0; color: #274257; font: 16px/1.5 Georgia; }
+      body { margin: 0; color: #274257; font: 16px/1.5 'Playground Sans'; }
       [data-note="my body content"] { color: var(--accent); }
       main { padding: 16px; }
       h1 { font-size: 24px; }
@@ -171,6 +185,266 @@ test('fresh full HTML compares two downloads while preserving RenderPDF.js text 
   expect(browserErrors).toEqual([]);
 });
 
+// The bundled directory guards against turning every rounded row marker into a bitmap.
+test('bundled 200-row directory keeps every ID and bounds raster captures', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  // The live preview owns the complete synthetic fixture before either export starts.
+  const preview = page.locator('#preview-host').locator('[data-preview-body]');
+  await expect(preview.locator('tbody tr')).toHaveCount(200);
+  const downloadButton = page.locator('#export-pdfs');
+  await expect(downloadButton).toBeEnabled();
+  // Inspect the package consumer's actual download, not an internal rendering shortcut.
+  const downloadPromise = page.waitForEvent('download', {
+    predicate: (download) => download.suggestedFilename() === 'renderpdf.pdf',
+  });
+  await downloadButton.click();
+  const download = await downloadPromise;
+  const outputPath = testInfo.outputPath('directory-renderpdf.pdf');
+  await download.saveAs(outputPath);
+  const evidence = await inspectPdf(await readFile(outputPath));
+  // Every table marker must remain selectable exactly once and in source order.
+  const actualIds = evidence.texts
+    .map(compact)
+    .join('')
+    .match(/#USR-\d{3}/g);
+  const expectedIds = Array.from(
+    { length: 200 },
+    (_, index) => `#USR-${String(index + 1).padStart(3, '0')}`,
+  );
+  expect(actualIds).toEqual(expectedIds);
+  // The header and four metric cards retain their local raster effects; rows stay vector.
+  expect(evidence.imagePaints).toBe(5);
+  await expect(page.locator('#warnings li').filter({ hasText: 'RASTER_FALLBACK' })).toHaveCount(5);
+  await expect(page.locator('#warnings')).not.toContainText('Automatic raster fallback on SPAN');
+  await expect(page.locator('#render-result')).toContainText('Done');
+});
+
+// Both bundled sources must follow the selected example through preview, export, edits and reset.
+test('example selector loads and resets each authored source', async ({ page }, testInfo) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  // Public controls and the shadow-root preview are the same surfaces a user sees.
+  const select = page.locator('#example-select');
+  const input = page.locator('#html-input');
+  const preview = page.locator('#preview-host').locator('[data-preview-body]');
+  const exportButton = page.locator('#export-pdfs');
+  const results = page.locator('#results');
+  await expect(select.locator('option')).toHaveText([/Example 1/, /Example 2/]);
+  await expect(select).toHaveValue('example-1');
+  await expect(input).toHaveValue(/Global User Directory/);
+  await expect(preview.locator('h1')).toContainText('User Profiles & Global Statistics');
+  await expect(preview.locator('tbody tr')).toHaveCount(200);
+  // A completed export gives the switch a stale result to clear.
+  await input.fill(withSampleFont('<p>Temporary comparison before switching examples.</p>'));
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(results).toBeVisible();
+
+  await select.selectOption('example-2');
+  await expect(input).toHaveValue(/Product Inventory List/);
+  await expect(preview.locator('h2')).toHaveText('Product Inventory List');
+  await expect(preview.locator('tbody tr')).toHaveCount(1000);
+  await expect(results).toBeHidden();
+  await expect(exportButton).toBeEnabled();
+
+  await input.fill(withSampleFont('<p>Edited inventory source.</p>'));
+  await page.locator('#reset-example').click();
+  await expect(select).toHaveValue('example-2');
+  await expect(input).toHaveValue(/Product Inventory List/);
+  await expect(preview.locator('tbody tr')).toHaveCount(1000);
+
+  // Times stays in the authored CSS; no matching font is uploaded or passed to RenderPDF.js.
+  await expect(exportButton).toBeEnabled();
+  await expect(page.locator('#font-mismatch')).toHaveValue('fallback');
+  await expect(page.locator('#font-requirements')).toContainText('Times New Roman');
+  await expect(page.locator('#registered-fonts')).not.toContainText('Times New Roman');
+  await expect(page.locator('#status')).toContainText('report any font substitutions');
+  const productNames = await preview.locator('tbody tr td:nth-child(2)').allTextContents();
+  expect(productNames).toHaveLength(1000);
+  const downloadPromise = page.waitForEvent('download', {
+    predicate: (download) => download.suggestedFilename() === 'renderpdf.pdf',
+  });
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#warnings')).toContainText('FONT_SUBSTITUTED');
+  await expect(page.locator('#warnings')).toContainText('RenderPDF Base');
+  const download = await downloadPromise;
+  const outputPath = testInfo.outputPath('example-2-renderpdf.pdf');
+  await download.saveAs(outputPath);
+  const extracted = compact((await inspectPdf(await readFile(outputPath), false)).texts.join(''));
+  // One scan catches omitted, split, reordered or duplicated labels without quadratic matching.
+  const expectedNames = productNames.map(compact);
+  expect(expectedNames.every((name) => /Model\d+$/.test(name))).toBe(true);
+  const prefixes = [...new Set(expectedNames.map((name) => name.replace(/Model\d+$/, '')))];
+  const escapedPrefixes = prefixes.map((prefix) => prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const actualNames =
+    extracted.match(new RegExp(`(?:${escapedPrefixes.join('|')})Model\\d+`, 'g')) ?? [];
+  expect(actualNames).toEqual(expectedNames);
+
+  // The same no-font source is rejected when the public mismatch option requires exact faces.
+  await page.locator('#font-mismatch').selectOption('error');
+  await expect(exportButton).toBeEnabled();
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Error');
+  await expect(page.locator('#render-result')).toContainText('Times New Roman');
+
+  await select.selectOption('example-1');
+  await expect(input).toHaveValue(/Global User Directory/);
+  await expect(preview.locator('tbody tr')).toHaveCount(200);
+  await expect(results).toBeHidden();
+  await expect(exportButton).toBeEnabled();
+});
+
+// The comparison must expose font substitutions while allowing optional exact TTF registration.
+test('font mismatch can fail RenderPDF.js, then exact uploaded faces remove the mismatch', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  const input = page.locator('#html-input');
+  const exportButton = page.locator('#export-pdfs');
+  // Browser default serif cannot identify one exact PDF program, but fallback stays available.
+  await input.fill('<p>Default serif must be reported.</p>');
+  await page.locator('#refresh-preview').click();
+  await expect(exportButton).toBeEnabled();
+  await expect(page.locator('#font-requirements')).toContainText('Generic font family serif');
+
+  // A custom family with normal and bold text needs both exact programs.
+  const text = 'Registered Unicode sample: \u011B\u0161\u010D\u0159\u017E\u00FD.';
+  await input.fill(
+    `<style>body{font-family:'Fixture Face'}</style><p>${text} <strong>Bold face.</strong></p>`,
+  );
+  await page.locator('#refresh-preview').click();
+  await expect(page.locator('#font-requirements')).toContainText('Fixture Face · 400 normal');
+  await expect(page.locator('#font-requirements')).toContainText('Fixture Face · 700 normal');
+  await expect(exportButton).toBeEnabled();
+  await page.locator('#font-mismatch').selectOption('error');
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Error');
+  await expect(page.locator('#render-result')).toContainText('Fixture Face');
+  await expect(page.locator('#jspdf-result')).toContainText('Done');
+  const fontFile = page.locator('#font-file');
+  for (const face of [
+    { file: 'Regular', weight: 400 },
+    { file: 'Bold', weight: 700 },
+  ]) {
+    const bytes = await readFile(
+      new URL(`../public/fonts/NotoSans-${face.file}.ttf`, import.meta.url),
+    );
+    await page.locator('#font-family').fill('Fixture Face');
+    await page.locator('#font-weight').fill(String(face.weight));
+    await fontFile.setInputFiles({
+      name: `Fixture-${face.file}.ttf`,
+      mimeType: 'font/ttf',
+      buffer: bytes,
+    });
+    await page.locator('#register-font').click();
+    await expect(page.locator('#font-status')).toContainText(
+      `Registered Fixture Face ${face.weight} normal`,
+    );
+    if (face.weight === 400) {
+      await expect(page.locator('#font-requirements')).toContainText('Fixture Face · 700 normal');
+      await expect(exportButton).toBeEnabled();
+    }
+  }
+  await expect(page.locator('#font-requirements')).toBeHidden();
+  await expect(exportButton).toBeEnabled();
+  await expect(page.locator('#preview-host').locator('p')).toHaveCSS(
+    'font-family',
+    '"Fixture Face"',
+  );
+
+  const downloads: Download[] = [];
+  page.on('download', (download) => downloads.push(download));
+  await exportButton.click();
+  await expect.poll(() => downloads.length).toBe(2);
+  for (const [name, filename] of [
+    ['renderpdf.pdf', 'registered-renderpdf.pdf'],
+    ['jspdf.pdf', 'registered-jspdf.pdf'],
+  ] as const) {
+    const download = downloads.find((item) => item.suggestedFilename() === name)!;
+    const path = testInfo.outputPath(filename);
+    await download.saveAs(path);
+    const extracted = compact((await inspectPdf(await readFile(path))).texts.join(''));
+    expect(extracted).toContain(compact(`${text} Bold face.`));
+  }
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#jspdf-result')).toContainText('Done');
+});
+
+// A text-free document needs no matching CSS face; the app can pass its minimal base handle.
+test('image-only source exports with the application base font handle', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page
+    .locator('#html-input')
+    .fill('<div style="width: 72px; height: 72px; background: #1264a3"></div>');
+  await page.locator('#refresh-preview').click();
+  await expect(page.locator('#font-requirements')).toBeHidden();
+  await expect(page.locator('#export-pdfs')).toBeEnabled();
+  await page.locator('#export-pdfs').click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#jspdf-result')).toContainText('Done');
+});
+
+// Optional profiling must account for the displayed total without changing the normal export path.
+test('stage profiling is opt-in and accounts for the measured RenderPDF.js total', async ({
+  page,
+}) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  // The short synthetic document keeps this check about measurement, not renderer throughput.
+  const input = page.locator('#html-input');
+  const profile = page.locator('#profile-stages');
+  const verification = page.locator('#source-verification');
+  const details = page.locator('#render-profile');
+  const exportButton = page.locator('#export-pdfs');
+  await expect(profile).not.toBeChecked();
+  await expect(verification).toHaveValue('mutations');
+  await expect(details).toBeHidden();
+  await input.fill(withSampleFont('<p>Profiled Unicode sample: &#269;.</p>'));
+  await profile.check();
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#jspdf-result')).toContainText('Done');
+  await expect(page.locator('#render-label')).toContainText('Fast static HTML');
+  await expect(page.locator('#warnings')).toContainText('SOURCE_VERIFICATION_REDUCED');
+  await expect(details).toBeVisible();
+  // Every public work stage appears once, followed by unreported work and Blob creation.
+  const labels = await details.locator('dt').allTextContents();
+  expect(labels).toEqual([
+    'Preparing',
+    'Layout',
+    'Pagination',
+    'Resources',
+    'Pages',
+    'Saving',
+    'Other / handoffs',
+    'Blob creation',
+  ]);
+  const values = await details.locator('dd').allTextContents();
+  expect(values).toHaveLength(labels.length);
+  for (const value of values) expect(value).toMatch(/^\d+\.\d ms$/);
+  // The table rounds to hundredths of a second and each detail to one millisecond decimal.
+  const detailedTotalMs = values.reduce((sumMs, value) => sumMs + Number.parseFloat(value), 0);
+  const totalText = await page.locator('#render-result td').first().textContent();
+  const displayedTotalMs = Number.parseFloat(totalText ?? '') * 1_000;
+  expect(Math.abs(detailedTotalMs - displayedTotalMs)).toBeLessThan(10);
+  // Turning profiling off removes its prior measurements and leaves the default export usable.
+  await profile.uncheck();
+  await expect(details).toBeHidden();
+  await expect(page.locator('#results')).toBeHidden();
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#jspdf-result')).toContainText('Done');
+  await expect(details).toBeHidden();
+  // Full mode restores the stronger guard and clears the reduced-verification diagnostic.
+  await verification.selectOption('full');
+  await expect(page.locator('#results')).toBeHidden();
+  await exportButton.click();
+  await expect(page.locator('#render-result')).toContainText('Done');
+  await expect(page.locator('#render-label')).toContainText('Full CSS guard');
+  await expect(page.locator('#warnings')).not.toContainText('SOURCE_VERIFICATION_REDUCED');
+});
+
 // A complete legacy document exercises harmless metadata and discarded fonts through the public UI.
 test('legacy metadata and document font declarations preserve preview and Czech PDF text', async ({
   page,
@@ -198,7 +472,7 @@ test('legacy metadata and document font declarations preserve preview and Czech 
         }
         body { color: #274257; }
       }
-      body { margin: 0; font-family: "Legacy Face"; }
+      body { margin: 0; font-family: "Playground Sans"; }
       .normal { font-size: 14px; }
     </style></head><body><p><font class="normal">${text}</font></p></body></html>`;
   // Refreshing explicitly makes the expected preview independent of debounce timing.
@@ -210,6 +484,7 @@ test('legacy metadata and document font declarations preserve preview and Czech 
   await expect(preview).toHaveText(text);
   await expect(preview.locator('font')).toHaveCSS('font-size', '14px');
   await expect(preview.locator('font')).toHaveCSS('color', 'rgb(39, 66, 87)');
+  await expect(page.locator('#warnings')).toContainText('document @font-face declaration');
   await expect(downloadButton).toBeEnabled();
   // Inspect the user's downloaded bytes rather than treating a visible preview as proof of export.
   const downloadPromise = page.waitForEvent('download');
@@ -235,7 +510,10 @@ test('uploaded HTML becomes the preview and produces both measured PDFs', async 
   await page.locator('#html-file').setInputFiles({
     name: 'comparison.html',
     mimeType: 'text/html',
-    buffer: Buffer.from(`<html><body><p>${text}</p></body></html>`, 'utf8'),
+    buffer: Buffer.from(
+      `<html><head><style>body{font-family:'Playground Sans'}</style></head><body><p>${text}</p></body></html>`,
+      'utf8',
+    ),
   });
   await expect(page.locator('#preview-host').locator('[data-preview-body]')).toHaveText(text);
   const downloads: Download[] = [];
@@ -263,7 +541,9 @@ test('uploaded HTML becomes the preview and produces both measured PDFs', async 
 // The comparison UI exposes the library's optional CSS rejection policy.
 test('CSS checkbox switches between a completed export and strict rejection', async ({ page }) => {
   await page.goto('/', { waitUntil: 'networkidle' });
-  await page.locator('#html-input').fill('<p style="box-shadow: 0 3px 6px #345">Shadow.</p>');
+  await page
+    .locator('#html-input')
+    .fill(withSampleFont('<p style="box-shadow: 0 3px 6px #345">Shadow.</p>'));
   await page.locator('#export-pdfs').click();
   await expect(page.locator('#render-result')).toContainText('Done');
   await page.locator('#strict-css').check();
@@ -280,9 +560,11 @@ test('page-break checkbox fills the first page when authored breaks are disabled
   // Two short sections fit together, so a second page can only come from the authored rule.
   const firstSection = 'First short section.';
   const secondSection = 'Second section. The content continues.';
-  await page.locator('#html-input').fill(`<p>${firstSection}</p>
+  await page.locator('#html-input').fill(
+    withSampleFont(`<p>${firstSection}</p>
     <h2 style="break-before: page; page-break-before: always">Second section.</h2>
-    <p>The content continues.</p>`);
+    <p>The content continues.</p>`),
+  );
   // Default CSS mode must remain available for documents that deliberately start a new chapter.
   const respectPageBreaks = page.locator('#respect-page-breaks');
   await expect(respectPageBreaks).toBeChecked();
@@ -366,12 +648,12 @@ test('active markup clears preview while missing images remain visible until cor
   await expect(downloadButton).toBeDisabled();
   await expect(preview).toHaveCount(0);
   // A valid body fragment restores both the isolated preview and the real download action.
-  await input.fill('<p>Corrected document.</p>');
+  await input.fill(withSampleFont('<p>Corrected document.</p>'));
   await refreshButton.click();
   await expect(preview).toHaveText('Corrected document.');
   await expect(downloadButton).toBeEnabled();
   // Reset remains a normal user action and restores the bundled sample after custom input.
   await page.locator('#reset-example').click();
-  await expect(input).not.toHaveValue('<p>Corrected document.</p>');
+  await expect(input).not.toHaveValue(withSampleFont('<p>Corrected document.</p>'));
   await expect(downloadButton).toBeEnabled();
 });

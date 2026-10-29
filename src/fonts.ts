@@ -253,6 +253,36 @@ export function resolveRegisteredFont(
   return selected;
 }
 
+/** Choose an owned substitute face without allowing browser-synthesized PDF styles. */
+export function selectFallbackFont(
+  /** Browser-computed style of text whose requested face is unavailable. */
+  style: CSSStyleDeclaration,
+  /** Registered programs available to both browser and PDF rendering. */
+  fonts: readonly RegisteredFont[],
+  /** Explicit substitute family, or the library's bundled base family. */
+  family: string,
+): RegisteredFont {
+  // A declared fallback must resolve to one actually registered program.
+  const candidates = fonts.filter((font) => font.family.toLowerCase() === family.toLowerCase());
+  if (candidates.length === 0) {
+    throw new RenderPDFError(
+      'INVALID_OPTIONS',
+      `fontFallback requires a registered family: ${family}.`,
+    );
+  }
+  // Preserve italic before weight when the available family does not have every combination.
+  const requestedStyle = style.fontStyle === 'italic' ? 'italic' : 'normal';
+  const sameStyle = candidates.filter((font) => font.style === requestedStyle);
+  const styled = sameStyle.length > 0 ? sameStyle : candidates;
+  const requestedWeight = Number(style.fontWeight);
+  const targetWeight = Number.isFinite(requestedWeight) ? requestedWeight : 400;
+  return [...styled].sort(
+    (left, right) =>
+      Math.abs(left.weight - targetWeight) - Math.abs(right.weight - targetWeight) ||
+      left.weight - right.weight,
+  )[0]!;
+}
+
 /** Reject browser faces that could select another program for the same explicit descriptor.
  * @param fontDocument Browser document whose existing CSS and script faces participate in layout.
  * @param family Case-insensitive custom family being registered.

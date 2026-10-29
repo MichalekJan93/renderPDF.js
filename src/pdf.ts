@@ -25,17 +25,73 @@ import { inspectBitmap, validatePngData } from './image-input.js';
 import { nativeImageFormat } from './images.js';
 import type { PageText, PreparedPageBand } from './page-bands.js';
 import type { PageSlice } from './pagination.js';
-import { captureRaster } from './raster.js';
+import { captureRaster, prepareRasterFontCss } from './raster.js';
 import { PositionedFont } from './text.js';
-import type { Bounds, LayoutSnapshot, PaintOperation, TextOperation } from './types.js';
+import type {
+  Bounds,
+  LayoutSnapshot,
+  PaintOperation,
+  RoundedCorners,
+  TextOperation,
+} from './types.js';
 
 /** CSS reference pixels convert to PDF points only at this adapter boundary. */
 const PX_TO_PT = 0.75;
+
+/** Approximate each quarter ellipse with one cubic PDF path segment. */
+const QUARTER_ELLIPSE = (4 / 3) * Math.tan(Math.PI / 8);
+
+/** Build a closed SVG path in local top-left CSS pixel coordinates. */
+function roundedRectanglePath(
+  /** Border-box width in CSS pixels. */
+  width: number,
+  /** Border-box height in CSS pixels. */
+  height: number,
+  /** Browser-resolved corner radii in CSS pixels. */
+  corners: RoundedCorners,
+): string {
+  // Each corner's control distances follow the same quarter-ellipse ratio.
+  const { topLeft, topRight, bottomRight, bottomLeft } = corners;
+  return [
+    `M ${topLeft.x} 0`,
+    `L ${width - topRight.x} 0`,
+    `C ${width - topRight.x + QUARTER_ELLIPSE * topRight.x} 0 ${width} ${topRight.y - QUARTER_ELLIPSE * topRight.y} ${width} ${topRight.y}`,
+    `L ${width} ${height - bottomRight.y}`,
+    `C ${width} ${height - bottomRight.y + QUARTER_ELLIPSE * bottomRight.y} ${width - bottomRight.x + QUARTER_ELLIPSE * bottomRight.x} ${height} ${width - bottomRight.x} ${height}`,
+    `L ${bottomLeft.x} ${height}`,
+    `C ${bottomLeft.x - QUARTER_ELLIPSE * bottomLeft.x} ${height} 0 ${height - bottomLeft.y + QUARTER_ELLIPSE * bottomLeft.y} 0 ${height - bottomLeft.y}`,
+    `L 0 ${topLeft.y}`,
+    `C 0 ${topLeft.y - QUARTER_ELLIPSE * topLeft.y} ${topLeft.x - QUARTER_ELLIPSE * topLeft.x} 0 ${topLeft.x} 0`,
+    'Z',
+  ].join(' ');
+}
+
+/** Inset an already normalized CSS corner for a uniform centered border stroke. */
+function insetRoundedCorners(
+  /** Outer border-box radii in CSS pixels. */
+  corners: RoundedCorners,
+  /** Half the uniform border width in CSS pixels. */
+  inset: number,
+): RoundedCorners {
+  // A zero inner component becomes square instead of crossing the opposite edge.
+  const reduce = ({ x, y }: RoundedCorners['topLeft']) => ({
+    x: Math.max(0, x - inset),
+    y: Math.max(0, y - inset),
+  });
+  return {
+    topLeft: reduce(corners.topLeft),
+    topRight: reduce(corners.topRight),
+    bottomRight: reduce(corners.bottomRight),
+    bottomLeft: reduce(corners.bottomLeft),
+  };
+}
 
 /** Bounded writer settings independent of DOM layout measurement. */
 export interface PDFWriteOptions {
   /** Physical pixels per CSS pixel for explicitly selected raster regions. */
   rasterScale?: number;
+  /** Selected replacement family, used to reject unsafe raster text substitution. */
+  fontFallback?: string;
   /** Include extraction-only text inside a region already painted as a bitmap. */
   includeRasterText?: boolean;
   /** Omit a raster root's unsupported outer shadow without changing the source. */
@@ -377,9 +433,35 @@ export async function writePDF(
     throwIfAborted(options.signal);
     pdf.registerFontkit(fontkit);
     applyPDFMetadata(pdf, options.metadata);
+    // Only faces referenced by selectable text or text bands need PDF font objects.
+    const neededFaceDescriptors = new Set(
+      snapshot.operations
+        .filter(
+          (operation): operation is Extract<PaintOperation, { kind: 'text' }> =>
+            operation.kind === 'text' &&
+            (!operation.invisible || options.includeRasterText !== false),
+        )
+        .map(
+          (operation) => `${operation.family.toLowerCase()}:${operation.weight}:${operation.style}`,
+        ),
+    );
+    const neededBandFaces = new Set<RegisteredFont>();
+    for (const band of [options.header, options.footer]) {
+      if (!band || ('kind' in band && band.kind === 'html')) continue;
+      if ('kind' in band && band.kind === 'slots') {
+        for (const line of band.lines) neededBandFaces.add(line.font);
+      } else {
+        neededBandFaces.add(band.font);
+      }
+    }
+    const embeddedDefinitions = fonts.filter(
+      (font) =>
+        neededBandFaces.has(font) ||
+        neededFaceDescriptors.has(`${font.family.toLowerCase()}:${font.weight}:${font.style}`),
+    );
     // Resources count processed fonts, local paint and prepared HTML forms.
     const resourceTotal = options.reportProgress
-      ? fonts.length +
+      ? embeddedDefinitions.length +
         snapshot.operations.filter(
           (operation) => operation.kind === 'image' || operation.kind === 'raster',
         ).length +
@@ -399,7 +481,7 @@ export async function writePDF(
       await options.reportProgress({ stage: 'resources', completed: 0, total: resourceTotal });
     // Full embedding avoids subset/ligature mapping complications without using private APIs.
     const faces: EmbeddedFace[] = [];
-    for (const definition of fonts) {
+    for (const definition of embeddedDefinitions) {
       throwIfAborted(options.signal);
       // Cache coverage once per embedded face rather than rebuilding it for every line.
       const font = await pdf.embedFont(definition.bytes);
@@ -476,12 +558,16 @@ export async function writePDF(
     const images = new Map<object, PDFImage>();
     // Repeated native image references share one embedded resource within the export.
     const nativeImages = new Map<string, PDFImage>();
+    // Prepare font data URLs only if an operation actually needs a local raster capture.
+    let rasterFontCss: string | undefined;
     for (const operation of snapshot.operations) {
       throwIfAborted(options.signal);
       if (operation.kind === 'raster') {
         // Paint fractional origins inside the bitmap, avoiding another PDF image shift.
         const aligned = rasterPlacement(operation.bounds);
         try {
+          // The immutable string is shared across captures and released with this export.
+          rasterFontCss ??= prepareRasterFontCss(fonts);
           // Local capture owns its temporary resources and never mutates the source.
           const bytes = await captureRaster(
             operation.element,
@@ -492,6 +578,8 @@ export async function writePDF(
               y: operation.bounds.y - aligned.y,
             },
             options.omitUnsupportedCss ?? false,
+            rasterFontCss,
+            options.fontFallback,
           );
           throwIfAborted(options.signal);
           images.set(operation, await pdf.embedPng(bytes));
@@ -593,23 +681,58 @@ export async function writePDF(
             const background = parseColor(operation.background);
             // Border color remains explicit even when a fully transparent background is used.
             const border = parseColor(operation.borderColor);
-            page.drawRectangle({
-              ...position,
-              color: background.color,
-              opacity: background.opacity,
-            });
-            if (operation.borderWidth > 0) {
-              // Native borders remain uniform solid strokes within the supported subset.
-              const inset = (operation.borderWidth * sourceScale * PX_TO_PT) / 2;
-              page.drawRectangle({
-                x: position.x + inset,
-                y: position.y + inset,
-                width: position.width - inset * 2,
-                height: position.height - inset * 2,
-                borderWidth: operation.borderWidth * sourceScale * PX_TO_PT,
-                borderColor: border.color,
-                borderOpacity: border.opacity,
+            if (operation.roundedCorners) {
+              // SVG path coordinates run down from this PDF top edge, preserving the CSS-pixel shape.
+              const path = roundedRectanglePath(
+                bounds.width,
+                bounds.height,
+                operation.roundedCorners,
+              );
+              page.drawSvgPath(path, {
+                x: position.x,
+                y: position.y + position.height,
+                scale: sourceScale * PX_TO_PT,
+                color: background.color,
+                opacity: background.opacity,
               });
+              if (operation.borderWidth > 0) {
+                // An inset centerline places the border entirely inside the rounded outer edge.
+                const inset = operation.borderWidth / 2;
+                page.drawSvgPath(
+                  roundedRectanglePath(
+                    bounds.width - operation.borderWidth,
+                    bounds.height - operation.borderWidth,
+                    insetRoundedCorners(operation.roundedCorners, inset),
+                  ),
+                  {
+                    x: position.x + inset * sourceScale * PX_TO_PT,
+                    y: position.y + position.height - inset * sourceScale * PX_TO_PT,
+                    scale: sourceScale * PX_TO_PT,
+                    borderWidth: operation.borderWidth,
+                    borderColor: border.color,
+                    borderOpacity: border.opacity,
+                  },
+                );
+              }
+            } else {
+              page.drawRectangle({
+                ...position,
+                color: background.color,
+                opacity: background.opacity,
+              });
+              if (operation.borderWidth > 0) {
+                // Native rectangular borders remain uniform solid strokes within the supported subset.
+                const inset = (operation.borderWidth * sourceScale * PX_TO_PT) / 2;
+                page.drawRectangle({
+                  x: position.x + inset,
+                  y: position.y + inset,
+                  width: position.width - inset * 2,
+                  height: position.height - inset * 2,
+                  borderWidth: operation.borderWidth * sourceScale * PX_TO_PT,
+                  borderColor: border.color,
+                  borderOpacity: border.opacity,
+                });
+              }
             }
           } else if (operation.kind === 'border') {
             // Shared collapsed edges are already resolved and paint once as native filled rectangles.

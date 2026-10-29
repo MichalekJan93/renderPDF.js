@@ -61,8 +61,21 @@ export function resolvePage(
   /** Caller-owned HTML rendering options. */
   options: RenderPDFOptions,
 ): PageGeometry {
-  if (!options || !Array.isArray(options.fonts) || options.fonts.length === 0) {
-    throw new RenderPDFError('INVALID_OPTIONS', 'Provide at least one explicitly registered font.');
+  if (!options || (options.fonts !== undefined && !Array.isArray(options.fonts))) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'fonts must be an array when provided.');
+  }
+  if (
+    options.fontMismatch !== undefined &&
+    options.fontMismatch !== 'error' &&
+    options.fontMismatch !== 'fallback'
+  ) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'fontMismatch must be error or fallback.');
+  }
+  if (
+    options.fontFallback !== undefined &&
+    (typeof options.fontFallback !== 'string' || !options.fontFallback.trim())
+  ) {
+    throw new RenderPDFError('INVALID_OPTIONS', 'fontFallback must be a nonempty font family.');
   }
   // HTML can choose paper orientation after measuring its source; preflight uses portrait.
   const geometry = resolvePageGeometry({

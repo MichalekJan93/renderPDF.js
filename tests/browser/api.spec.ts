@@ -85,7 +85,9 @@ test('public API exports a mixed invoice with explicit fonts, custom pages and a
     const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
     // Registered fonts are opaque tokens returned by the public registration function.
     const fonts = (
-      window as unknown as { invoiceFonts: Parameters<typeof api.renderPDF>[1]['fonts'] }
+      window as unknown as {
+        invoiceFonts: NonNullable<NonNullable<Parameters<typeof api.renderPDF>[1]>['fonts']>;
+      }
     ).invoiceFonts;
     // Callback diagnostics and retained result diagnostics must agree for the same export.
     const callbackWarnings: string[] = [];

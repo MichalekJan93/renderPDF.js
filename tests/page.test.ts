@@ -29,12 +29,15 @@ describe('public page options', () => {
     // Auto orientation keeps portrait paper during preflight; the measured renderer chooses later.
     expect(resolvePage({ fonts, format: 'Letter', orientation: 'auto' }).width).toBe(816);
     expect(resolvePage({ fonts, fit: 'width' }).width).toBeCloseTo(793.707, 2);
+    // Font sources are optional at the public boundary; the renderer loads its base face later.
+    expect(resolvePage({}).width).toBeCloseTo(793.707, 2);
+    expect(resolvePage({ fonts: [] }).width).toBeCloseTo(793.707, 2);
   });
 
   it('rejects invalid runtime options before a browser or PDF document is needed', () => {
     // JavaScript consumers can supply values outside the compile-time union.
     const invalid = [
-      { fonts: [] },
+      { fonts: 7 },
       { fonts, format: 'Unknown' },
       { fonts, format: { width: 0, height: 400 } },
       { fonts, format: { width: 500, height: Number.POSITIVE_INFINITY } },
@@ -49,6 +52,8 @@ describe('public page options', () => {
       { fonts, onWarning: 'log' },
       { fonts, fallback: 'everything' },
       { fonts, pageBreak: 'print' },
+      { fonts, fontMismatch: 'ignore' },
+      { fonts, fontFallback: '' },
     ];
     for (const options of invalid) {
       expect(() => resolvePage(options as RenderPDFOptions)).toThrow(

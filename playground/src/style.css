@@ -18,6 +18,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -34,6 +35,7 @@ button {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible {
   outline: 3px solid #86b2ff;
   outline-offset: 3px;
@@ -131,6 +133,18 @@ label {
   line-height: 1.65;
 }
 
+select {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px solid #cbd5e3;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #263c56;
+  background: #f9fbfe;
+}
+
 textarea {
   display: block;
   width: 100%;
@@ -153,6 +167,62 @@ input[type='file'] {
   margin-top: 10px;
   color: #344c6a;
   font-size: 12px;
+}
+
+.font-panel {
+  min-width: 0;
+  margin-top: 20px;
+  border: 1px solid #dce3ed;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.font-panel legend {
+  padding: 0 5px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.font-panel .field-help {
+  margin-top: 0;
+}
+
+.font-fields {
+  display: grid;
+  grid-template-columns: minmax(150px, 2fr) minmax(85px, 1fr) minmax(110px, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.font-fields input,
+.font-fields select {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  margin-top: 6px;
+  border: 1px solid #cbd5e3;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #263c56;
+  background: #f9fbfe;
+}
+
+.font-panel button {
+  margin-top: 12px;
+}
+
+#registered-fonts {
+  margin: 0;
+  padding-left: 20px;
+  color: #617087;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 700px) {
+  .font-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .checkbox-label {
@@ -255,6 +325,40 @@ input[type='file'] {
 .results td:last-child {
   max-width: 170px;
   overflow-wrap: anywhere;
+}
+
+.timing-profile {
+  margin-top: 14px;
+  border: 1px solid #dce3ed;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #344c6a;
+  background: #f9fbfe;
+  font-size: 12px;
+}
+
+.timing-profile summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.timing-profile dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 16px;
+  margin: 12px 0 0;
+}
+
+.timing-profile dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.timing-profile p {
+  margin: 10px 0 0;
+  color: #617087;
+  line-height: 1.5;
 }
 
 .winner {

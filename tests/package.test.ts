@@ -13,7 +13,9 @@ function requiredFiles(): PackedFile[] {
     'API.md',
     'CHANGELOG.md',
     'LICENSE',
+    'assets/NotoSans-OFL.txt',
     'assets/renderpdf-logo.png',
+    'dist/base-font-verified.js',
     'dist/index.js',
     'dist/index.d.ts',
   ];
@@ -49,6 +51,7 @@ describe('npm package contents', () => {
     'CHANGELOG.md',
     'LICENSE',
     'assets/renderpdf-logo.png',
+    'assets/NotoSans-OFL.txt',
   ])('rejects a package missing its required file: %s', (path) => {
     // Removing a required path simulates an incomplete build or overbroad exclusion.
     const files = requiredFiles().filter((file) => file.path !== path);

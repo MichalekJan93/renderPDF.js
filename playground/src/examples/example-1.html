@@ -1,0 +1,4204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Global User Directory & Statistics</title>
+    <style>
+      /* CSS Reset & Global Layout */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: 'Playground Sans';
+        background-color: #f8fafc;
+        color: #334155;
+        line-height: 1.5;
+        padding: 2rem 1.5rem;
+      }
+
+      .container {
+        max-width: 1280px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1.75rem;
+      }
+
+      /* Hero Header Section */
+      .header-card {
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4338ca 100%);
+        color: #ffffff;
+        padding: 2.25rem 2.5rem;
+        border-radius: 1rem;
+        box-shadow: 0 10px 25px -5px rgba(49, 46, 129, 0.25);
+      }
+
+      .header-badge {
+        display: inline-flex;
+        align-items: center;
+        background-color: rgba(255, 255, 255, 0.15);
+        color: #c7d2fe;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.3rem 0.8rem;
+        border-radius: 9999px;
+        margin-bottom: 0.875rem;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+
+      .header-card h1 {
+        font-size: 2.125rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        color: #ffffff;
+      }
+
+      .header-card p {
+        color: #c7d2fe;
+        font-size: 1rem;
+        max-width: 760px;
+        font-weight: 400;
+      }
+
+      /* Metric Cards Grid */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1.25rem;
+      }
+
+      .stat-card {
+        background-color: #ffffff;
+        padding: 1.35rem 1.5rem;
+        border-radius: 0.875rem;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .stat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+
+      .stat-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #64748b;
+      }
+
+      .stat-icon-pill {
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.875rem;
+        font-weight: 700;
+      }
+
+      .bg-indigo-light {
+        background-color: #e0e7ff;
+        color: #4338ca;
+      }
+      .bg-emerald-light {
+        background-color: #d1fae5;
+        color: #047857;
+      }
+      .bg-sky-light {
+        background-color: #e0f2fe;
+        color: #0369a1;
+      }
+      .bg-amber-light {
+        background-color: #fef3c7;
+        color: #b45309;
+      }
+
+      .stat-value {
+        font-size: 1.875rem;
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .stat-subtext {
+        font-size: 0.775rem;
+        font-weight: 400;
+        margin-top: 0.35rem;
+      }
+
+      .text-emerald {
+        color: #059669;
+      }
+      .text-indigo {
+        color: #4f46e5;
+      }
+      .text-sky {
+        color: #0284c7;
+      }
+      .text-amber {
+        color: #d97706;
+      }
+
+      /* Main Data Table Wrapper */
+      .table-card {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        box-shadow:
+          0 4px 6px -1px rgba(0, 0, 0, 0.03),
+          0 2px 4px -2px rgba(0, 0, 0, 0.03);
+      }
+
+      .table-header-bar {
+        padding: 1.125rem 1.5rem;
+        background-color: #ffffff;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .table-title-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .table-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .table-count-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        background-color: #f1f5f9;
+        color: #475569;
+        padding: 0.2rem 0.65rem;
+        border-radius: 9999px;
+        border: 1px solid #e2e8f0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 0.875rem;
+      }
+
+      thead {
+        background-color: #f8fafc;
+      }
+
+      th {
+        padding: 0.875rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: #475569;
+        border-bottom: 1px solid #cbd5e1;
+        background-color: #f8fafc;
+      }
+
+      td {
+        padding: 0.875rem 0.5rem;
+        border-bottom: 1px solid #f1f5f9;
+        color: #334155;
+        vertical-align: middle;
+      }
+
+      tbody tr:nth-child(even) {
+        background-color: #fafafa;
+      }
+
+      tbody tr:hover {
+        background-color: #f1f5f9;
+      }
+
+      /* Member Profile Info Column */
+      .user-profile {
+        display: flex;
+        align-items: center;
+        gap: 0.875rem;
+      }
+
+      .avatar {
+        width: 2.35rem;
+        height: 2.35rem;
+        border-radius: 9999px;
+        background-color: #e0e7ff;
+        color: #3730a3;
+        font-weight: 700;
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        border: 1px solid #c7d2fe;
+      }
+
+      .user-name {
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.25;
+      }
+
+      .user-email {
+        font-size: 0.775rem;
+        color: #64748b;
+      }
+
+      .id-cell {
+        font-family: 'Playground Sans';
+        color: #64748b;
+        font-size: 0.75rem;
+        font-weight: 700;
+      }
+
+      /* Status & Department Badges */
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.65rem;
+        border-radius: 9999px;
+        font-size: 0.725rem;
+        font-weight: 700;
+      }
+
+      .status-active {
+        background-color: #d1fae5;
+        color: #065f46;
+      }
+
+      .status-inactive {
+        background-color: #f1f5f9;
+        color: #475569;
+      }
+
+      .status-pending {
+        background-color: #fef3c7;
+        color: #92400e;
+      }
+
+      .status-dot {
+        width: 0.375rem;
+        height: 0.375rem;
+        border-radius: 9999px;
+        margin-right: 0.375rem;
+      }
+
+      .status-active .status-dot {
+        background-color: #10b981;
+      }
+      .status-inactive .status-dot {
+        background-color: #94a3b8;
+      }
+      .status-pending .status-dot {
+        background-color: #f59e0b;
+      }
+
+      .role-text {
+        font-weight: 400;
+        color: #334155;
+      }
+
+      /* Custom Scrollbar */
+      .scroll-container::-webkit-scrollbar {
+        width: 8px;
+      }
+      .scroll-container::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+      .scroll-container::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      .scroll-container::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header Section -->
+      <div class="header-card">
+        <span class="header-badge">Static Platform Directory</span>
+        <h1>User Profiles & Global Statistics</h1>
+        <p>
+          A comprehensive static record of active platform members across various departments and
+          global regions, presenting structural roles, verified emails, and operational statuses.
+        </p>
+      </div>
+
+      <!-- Metric Cards Section -->
+      <section class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-title">Total Users</span>
+            <div class="stat-icon-pill bg-indigo-light">#</div>
+          </div>
+          <div class="stat-value">200</div>
+          <span class="stat-subtext text-indigo">Full directory headcount</span>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-title">Active Accounts</span>
+            <div class="stat-icon-pill bg-emerald-light">OK</div>
+          </div>
+          <div class="stat-value">148</div>
+          <span class="stat-subtext text-emerald">74% operational activity rate</span>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-title">Verified Emails</span>
+            <div class="stat-icon-pill bg-sky-light">@</div>
+          </div>
+          <div class="stat-value">192</div>
+          <span class="stat-subtext text-sky">96% security verified</span>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-title">System Roles</span>
+            <div class="stat-icon-pill bg-amber-light">*</div>
+          </div>
+          <div class="stat-value">6</div>
+          <span class="stat-subtext text-amber">Engineering, Design & Support</span>
+        </div>
+      </section>
+
+      <!-- Pure Static Table Container -->
+      <main class="table-card">
+        <div class="table-header-bar">
+          <div class="table-title-group">
+            <span class="table-title">Registered Members</span>
+            <span class="table-count-badge">200 Total Records</span>
+          </div>
+        </div>
+
+        <div class="scroll-container">
+          <table>
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Name & Email</th>
+                <th>Role / Department</th>
+                <th>Country</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Exactly 200 Hardcoded English User Rows -->
+              <tr>
+                <td class="id-cell">#USR-001</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JS</div>
+                    <div>
+                      <div class="user-name">James Smith</div>
+                      <div class="user-email">james.smith1@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-002</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MJ</div>
+                    <div>
+                      <div class="user-name">Mary Johnson</div>
+                      <div class="user-email">mary.johnson2@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-003</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RW</div>
+                    <div>
+                      <div class="user-name">Robert Williams</div>
+                      <div class="user-email">robert.williams3@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-004</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PB</div>
+                    <div>
+                      <div class="user-name">Patricia Brown</div>
+                      <div class="user-email">patricia.brown4@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-005</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JJ</div>
+                    <div>
+                      <div class="user-name">John Jones</div>
+                      <div class="user-email">john.jones5@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-006</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">Jennifer Miller</div>
+                      <div class="user-email">jennifer.miller6@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-007</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MD</div>
+                    <div>
+                      <div class="user-name">Michael Davis</div>
+                      <div class="user-email">michael.davis7@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-008</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LR</div>
+                    <div>
+                      <div class="user-name">Linda Rodriguez</div>
+                      <div class="user-email">linda.rodriguez8@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-009</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WM</div>
+                    <div>
+                      <div class="user-name">William Martinez</div>
+                      <div class="user-email">william.martinez9@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-010</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EH</div>
+                    <div>
+                      <div class="user-name">Elizabeth Hernandez</div>
+                      <div class="user-email">elizabeth.hernandez10@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-011</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DL</div>
+                    <div>
+                      <div class="user-name">David Lopez</div>
+                      <div class="user-email">david.lopez11@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-012</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BG</div>
+                    <div>
+                      <div class="user-name">Barbara Gonzalez</div>
+                      <div class="user-email">barbara.gonzalez12@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-013</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RW</div>
+                    <div>
+                      <div class="user-name">Richard Wilson</div>
+                      <div class="user-email">richard.wilson13@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-014</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SA</div>
+                    <div>
+                      <div class="user-name">Susan Anderson</div>
+                      <div class="user-email">susan.anderson14@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-015</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JT</div>
+                    <div>
+                      <div class="user-name">Joseph Thomas</div>
+                      <div class="user-email">joseph.thomas15@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-016</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JT</div>
+                    <div>
+                      <div class="user-name">Jessica Taylor</div>
+                      <div class="user-email">jessica.taylor16@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-017</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TM</div>
+                    <div>
+                      <div class="user-name">Thomas Moore</div>
+                      <div class="user-email">thomas.moore17@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-018</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SJ</div>
+                    <div>
+                      <div class="user-name">Sarah Jackson</div>
+                      <div class="user-email">sarah.jackson18@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-019</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CM</div>
+                    <div>
+                      <div class="user-name">Charles Martin</div>
+                      <div class="user-email">charles.martin19@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-020</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KL</div>
+                    <div>
+                      <div class="user-name">Karen Lee</div>
+                      <div class="user-email">karen.lee20@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-021</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">OP</div>
+                    <div>
+                      <div class="user-name">Oliver Perez</div>
+                      <div class="user-email">oliver.perez21@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-022</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ET</div>
+                    <div>
+                      <div class="user-name">Emma Thompson</div>
+                      <div class="user-email">emma.thompson22@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-023</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LW</div>
+                    <div>
+                      <div class="user-name">Liam White</div>
+                      <div class="user-email">liam.white23@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-024</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SH</div>
+                    <div>
+                      <div class="user-name">Sophia Harris</div>
+                      <div class="user-email">sophia.harris24@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-025</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LS</div>
+                    <div>
+                      <div class="user-name">Lucas Sanchez</div>
+                      <div class="user-email">lucas.sanchez25@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-026</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">AC</div>
+                    <div>
+                      <div class="user-name">Ava Clark</div>
+                      <div class="user-email">ava.clark26@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-027</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">NR</div>
+                    <div>
+                      <div class="user-name">Noah Ramirez</div>
+                      <div class="user-email">noah.ramirez27@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-028</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">IL</div>
+                    <div>
+                      <div class="user-name">Isabella Lewis</div>
+                      <div class="user-email">isabella.lewis28@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-029</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ES</div>
+                    <div>
+                      <div class="user-name">Ethan Smith</div>
+                      <div class="user-email">ethan.smith29@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-030</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MJ</div>
+                    <div>
+                      <div class="user-name">Mia Johnson</div>
+                      <div class="user-email">mia.johnson30@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-031</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JW</div>
+                    <div>
+                      <div class="user-name">James Williams</div>
+                      <div class="user-email">james.williams31@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-032</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MB</div>
+                    <div>
+                      <div class="user-name">Mary Brown</div>
+                      <div class="user-email">mary.brown32@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-033</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RJ</div>
+                    <div>
+                      <div class="user-name">Robert Jones</div>
+                      <div class="user-email">robert.jones33@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-034</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PG</div>
+                    <div>
+                      <div class="user-name">Patricia Garcia</div>
+                      <div class="user-email">patricia.garcia34@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-035</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">John Miller</div>
+                      <div class="user-email">john.miller35@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-036</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JD</div>
+                    <div>
+                      <div class="user-name">Jennifer Davis</div>
+                      <div class="user-email">jennifer.davis36@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-037</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MR</div>
+                    <div>
+                      <div class="user-name">Michael Rodriguez</div>
+                      <div class="user-email">michael.rodriguez37@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-038</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LM</div>
+                    <div>
+                      <div class="user-name">Linda Martinez</div>
+                      <div class="user-email">linda.martinez38@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-039</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WH</div>
+                    <div>
+                      <div class="user-name">William Hernandez</div>
+                      <div class="user-email">william.hernandez39@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-040</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EL</div>
+                    <div>
+                      <div class="user-name">Elizabeth Lopez</div>
+                      <div class="user-email">elizabeth.lopez40@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-041</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DG</div>
+                    <div>
+                      <div class="user-name">David Gonzalez</div>
+                      <div class="user-email">david.gonzalez41@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-042</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BW</div>
+                    <div>
+                      <div class="user-name">Barbara Wilson</div>
+                      <div class="user-email">barbara.wilson42@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-043</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RA</div>
+                    <div>
+                      <div class="user-name">Richard Anderson</div>
+                      <div class="user-email">richard.anderson43@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-044</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ST</div>
+                    <div>
+                      <div class="user-name">Susan Thomas</div>
+                      <div class="user-email">susan.thomas44@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-045</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JT</div>
+                    <div>
+                      <div class="user-name">Joseph Taylor</div>
+                      <div class="user-email">joseph.taylor45@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-046</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">Jessica Moore</div>
+                      <div class="user-email">jessica.moore46@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-047</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TJ</div>
+                    <div>
+                      <div class="user-name">Thomas Jackson</div>
+                      <div class="user-email">thomas.jackson47@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-048</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SM</div>
+                    <div>
+                      <div class="user-name">Sarah Martin</div>
+                      <div class="user-email">sarah.martin48@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-049</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CL</div>
+                    <div>
+                      <div class="user-name">Charles Lee</div>
+                      <div class="user-email">charles.lee49@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-050</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KP</div>
+                    <div>
+                      <div class="user-name">Karen Perez</div>
+                      <div class="user-email">karen.perez50@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-051</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">OT</div>
+                    <div>
+                      <div class="user-name">Oliver Thompson</div>
+                      <div class="user-email">oliver.thompson51@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-052</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EW</div>
+                    <div>
+                      <div class="user-name">Emma White</div>
+                      <div class="user-email">emma.white52@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-053</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LH</div>
+                    <div>
+                      <div class="user-name">Liam Harris</div>
+                      <div class="user-email">liam.harris53@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-054</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SS</div>
+                    <div>
+                      <div class="user-name">Sophia Sanchez</div>
+                      <div class="user-email">sophia.sanchez54@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-055</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LC</div>
+                    <div>
+                      <div class="user-name">Lucas Clark</div>
+                      <div class="user-email">lucas.clark55@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-056</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">AR</div>
+                    <div>
+                      <div class="user-name">Ava Ramirez</div>
+                      <div class="user-email">ava.ramirez56@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-057</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">NL</div>
+                    <div>
+                      <div class="user-name">Noah Lewis</div>
+                      <div class="user-email">noah.lewis57@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-058</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">IS</div>
+                    <div>
+                      <div class="user-name">Isabella Smith</div>
+                      <div class="user-email">isabella.smith58@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-059</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EJ</div>
+                    <div>
+                      <div class="user-name">Ethan Johnson</div>
+                      <div class="user-email">ethan.johnson59@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-060</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MW</div>
+                    <div>
+                      <div class="user-name">Mia Williams</div>
+                      <div class="user-email">mia.williams60@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-061</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JB</div>
+                    <div>
+                      <div class="user-name">James Brown</div>
+                      <div class="user-email">james.brown61@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-062</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MJ</div>
+                    <div>
+                      <div class="user-name">Mary Jones</div>
+                      <div class="user-email">mary.jones62@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-063</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RG</div>
+                    <div>
+                      <div class="user-name">Robert Garcia</div>
+                      <div class="user-email">robert.garcia63@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-064</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PM</div>
+                    <div>
+                      <div class="user-name">Patricia Miller</div>
+                      <div class="user-email">patricia.miller64@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-065</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JD</div>
+                    <div>
+                      <div class="user-name">John Davis</div>
+                      <div class="user-email">john.davis65@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-066</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JR</div>
+                    <div>
+                      <div class="user-name">Jennifer Rodriguez</div>
+                      <div class="user-email">jennifer.rodriguez66@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-067</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MM</div>
+                    <div>
+                      <div class="user-name">Michael Martinez</div>
+                      <div class="user-email">michael.martinez67@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-068</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LH</div>
+                    <div>
+                      <div class="user-name">Linda Hernandez</div>
+                      <div class="user-email">linda.hernandez68@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-069</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WL</div>
+                    <div>
+                      <div class="user-name">William Lopez</div>
+                      <div class="user-email">william.lopez69@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-070</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EG</div>
+                    <div>
+                      <div class="user-name">Elizabeth Gonzalez</div>
+                      <div class="user-email">elizabeth.gonzalez70@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-071</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DW</div>
+                    <div>
+                      <div class="user-name">David Wilson</div>
+                      <div class="user-email">david.wilson71@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-072</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BA</div>
+                    <div>
+                      <div class="user-name">Barbara Anderson</div>
+                      <div class="user-email">barbara.anderson72@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-073</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RT</div>
+                    <div>
+                      <div class="user-name">Richard Thomas</div>
+                      <div class="user-email">richard.thomas73@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-074</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ST</div>
+                    <div>
+                      <div class="user-name">Susan Taylor</div>
+                      <div class="user-email">susan.taylor74@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-075</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">Joseph Moore</div>
+                      <div class="user-email">joseph.moore75@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-076</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JJ</div>
+                    <div>
+                      <div class="user-name">Jessica Jackson</div>
+                      <div class="user-email">jessica.jackson76@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-077</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TM</div>
+                    <div>
+                      <div class="user-name">Thomas Martin</div>
+                      <div class="user-email">thomas.martin77@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-078</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SL</div>
+                    <div>
+                      <div class="user-name">Sarah Lee</div>
+                      <div class="user-email">sarah.lee78@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-079</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CP</div>
+                    <div>
+                      <div class="user-name">Charles Perez</div>
+                      <div class="user-email">charles.perez79@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-080</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KT</div>
+                    <div>
+                      <div class="user-name">Karen Thompson</div>
+                      <div class="user-email">karen.thompson80@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-081</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">OW</div>
+                    <div>
+                      <div class="user-name">Oliver White</div>
+                      <div class="user-email">oliver.white81@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-082</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EH</div>
+                    <div>
+                      <div class="user-name">Emma Harris</div>
+                      <div class="user-email">emma.harris82@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-083</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LS</div>
+                    <div>
+                      <div class="user-name">Liam Sanchez</div>
+                      <div class="user-email">liam.sanchez83@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-084</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SC</div>
+                    <div>
+                      <div class="user-name">Sophia Clark</div>
+                      <div class="user-email">sophia.clark84@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-085</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LR</div>
+                    <div>
+                      <div class="user-name">Lucas Ramirez</div>
+                      <div class="user-email">lucas.ramirez85@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-086</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">AL</div>
+                    <div>
+                      <div class="user-name">Ava Lewis</div>
+                      <div class="user-email">ava.lewis86@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-087</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">NS</div>
+                    <div>
+                      <div class="user-name">Noah Smith</div>
+                      <div class="user-email">noah.smith87@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-088</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">IJ</div>
+                    <div>
+                      <div class="user-name">Isabella Johnson</div>
+                      <div class="user-email">isabella.johnson88@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-089</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EW</div>
+                    <div>
+                      <div class="user-name">Ethan Williams</div>
+                      <div class="user-email">ethan.williams89@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-090</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MB</div>
+                    <div>
+                      <div class="user-name">Mia Brown</div>
+                      <div class="user-email">mia.brown90@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-091</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JJ</div>
+                    <div>
+                      <div class="user-name">James Jones</div>
+                      <div class="user-email">james.jones91@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-092</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MG</div>
+                    <div>
+                      <div class="user-name">Mary Garcia</div>
+                      <div class="user-email">mary.garcia92@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-093</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RM</div>
+                    <div>
+                      <div class="user-name">Robert Miller</div>
+                      <div class="user-email">robert.miller93@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-094</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PD</div>
+                    <div>
+                      <div class="user-name">Patricia Davis</div>
+                      <div class="user-email">patricia.davis94@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-095</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JR</div>
+                    <div>
+                      <div class="user-name">John Rodriguez</div>
+                      <div class="user-email">john.rodriguez95@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-096</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">Jennifer Martinez</div>
+                      <div class="user-email">jennifer.martinez96@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-097</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MH</div>
+                    <div>
+                      <div class="user-name">Michael Hernandez</div>
+                      <div class="user-email">michael.hernandez97@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-098</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LL</div>
+                    <div>
+                      <div class="user-name">Linda Lopez</div>
+                      <div class="user-email">linda.lopez98@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-099</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WG</div>
+                    <div>
+                      <div class="user-name">William Gonzalez</div>
+                      <div class="user-email">william.gonzalez99@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-100</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EW</div>
+                    <div>
+                      <div class="user-name">Elizabeth Wilson</div>
+                      <div class="user-email">elizabeth.wilson100@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-101</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DA</div>
+                    <div>
+                      <div class="user-name">David Anderson</div>
+                      <div class="user-email">david.anderson101@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-102</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BT</div>
+                    <div>
+                      <div class="user-name">Barbara Thomas</div>
+                      <div class="user-email">barbara.thomas102@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-103</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RT</div>
+                    <div>
+                      <div class="user-name">Richard Taylor</div>
+                      <div class="user-email">richard.taylor103@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-104</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SM</div>
+                    <div>
+                      <div class="user-name">Susan Moore</div>
+                      <div class="user-email">susan.moore104@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-105</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JJ</div>
+                    <div>
+                      <div class="user-name">Joseph Jackson</div>
+                      <div class="user-email">joseph.jackson105@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-106</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">Jessica Martin</div>
+                      <div class="user-email">jessica.martin106@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-107</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TL</div>
+                    <div>
+                      <div class="user-name">Thomas Lee</div>
+                      <div class="user-email">thomas.lee107@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-108</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SP</div>
+                    <div>
+                      <div class="user-name">Sarah Perez</div>
+                      <div class="user-email">sarah.perez108@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-109</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CT</div>
+                    <div>
+                      <div class="user-name">Charles Thompson</div>
+                      <div class="user-email">charles.thompson109@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-110</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KW</div>
+                    <div>
+                      <div class="user-name">Karen White</div>
+                      <div class="user-email">karen.white110@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-111</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">OH</div>
+                    <div>
+                      <div class="user-name">Oliver Harris</div>
+                      <div class="user-email">oliver.harris111@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-112</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ES</div>
+                    <div>
+                      <div class="user-name">Emma Sanchez</div>
+                      <div class="user-email">emma.sanchez112@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-113</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LC</div>
+                    <div>
+                      <div class="user-name">Liam Clark</div>
+                      <div class="user-email">liam.clark113@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-114</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SR</div>
+                    <div>
+                      <div class="user-name">Sophia Ramirez</div>
+                      <div class="user-email">sophia.ramirez114@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-115</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LL</div>
+                    <div>
+                      <div class="user-name">Lucas Lewis</div>
+                      <div class="user-email">lucas.lewis115@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-116</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">AS</div>
+                    <div>
+                      <div class="user-name">Ava Smith</div>
+                      <div class="user-email">ava.smith116@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-117</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">NJ</div>
+                    <div>
+                      <div class="user-name">Noah Johnson</div>
+                      <div class="user-email">noah.johnson117@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-118</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">IW</div>
+                    <div>
+                      <div class="user-name">Isabella Williams</div>
+                      <div class="user-email">isabella.williams118@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-119</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EB</div>
+                    <div>
+                      <div class="user-name">Ethan Brown</div>
+                      <div class="user-email">ethan.brown119@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-120</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MJ</div>
+                    <div>
+                      <div class="user-name">Mia Jones</div>
+                      <div class="user-email">mia.jones120@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-121</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JG</div>
+                    <div>
+                      <div class="user-name">James Garcia</div>
+                      <div class="user-email">james.garcia121@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-122</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MM</div>
+                    <div>
+                      <div class="user-name">Mary Miller</div>
+                      <div class="user-email">mary.miller122@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-123</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RD</div>
+                    <div>
+                      <div class="user-name">Robert Davis</div>
+                      <div class="user-email">robert.davis123@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-124</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PR</div>
+                    <div>
+                      <div class="user-name">Patricia Rodriguez</div>
+                      <div class="user-email">patricia.rodriguez124@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-125</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">John Martinez</div>
+                      <div class="user-email">john.martinez125@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-126</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JH</div>
+                    <div>
+                      <div class="user-name">Jennifer Hernandez</div>
+                      <div class="user-email">jennifer.hernandez126@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-127</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ML</div>
+                    <div>
+                      <div class="user-name">Michael Lopez</div>
+                      <div class="user-email">michael.lopez127@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-128</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LG</div>
+                    <div>
+                      <div class="user-name">Linda Gonzalez</div>
+                      <div class="user-email">linda.gonzalez128@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-129</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WW</div>
+                    <div>
+                      <div class="user-name">William Wilson</div>
+                      <div class="user-email">william.wilson129@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-130</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EA</div>
+                    <div>
+                      <div class="user-name">Elizabeth Anderson</div>
+                      <div class="user-email">elizabeth.anderson130@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-131</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DT</div>
+                    <div>
+                      <div class="user-name">David Thomas</div>
+                      <div class="user-email">david.thomas131@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-132</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BT</div>
+                    <div>
+                      <div class="user-name">Barbara Taylor</div>
+                      <div class="user-email">barbara.taylor132@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-133</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RM</div>
+                    <div>
+                      <div class="user-name">Richard Moore</div>
+                      <div class="user-email">richard.moore133@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-134</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SJ</div>
+                    <div>
+                      <div class="user-name">Susan Jackson</div>
+                      <div class="user-email">susan.jackson134@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-135</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">Joseph Martin</div>
+                      <div class="user-email">joseph.martin135@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-136</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JL</div>
+                    <div>
+                      <div class="user-name">Jessica Lee</div>
+                      <div class="user-email">jessica.lee136@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-137</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TP</div>
+                    <div>
+                      <div class="user-name">Thomas Perez</div>
+                      <div class="user-email">thomas.perez137@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-138</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ST</div>
+                    <div>
+                      <div class="user-name">Sarah Thompson</div>
+                      <div class="user-email">sarah.thompson138@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-139</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CW</div>
+                    <div>
+                      <div class="user-name">Charles White</div>
+                      <div class="user-email">charles.white139@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-140</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KH</div>
+                    <div>
+                      <div class="user-name">Karen Harris</div>
+                      <div class="user-email">karen.harris140@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-141</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">OS</div>
+                    <div>
+                      <div class="user-name">Oliver Sanchez</div>
+                      <div class="user-email">oliver.sanchez141@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-142</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EC</div>
+                    <div>
+                      <div class="user-name">Emma Clark</div>
+                      <div class="user-email">emma.clark142@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-143</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LR</div>
+                    <div>
+                      <div class="user-name">Liam Ramirez</div>
+                      <div class="user-email">liam.ramirez143@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-144</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SL</div>
+                    <div>
+                      <div class="user-name">Sophia Lewis</div>
+                      <div class="user-email">sophia.lewis144@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-145</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LS</div>
+                    <div>
+                      <div class="user-name">Lucas Smith</div>
+                      <div class="user-email">lucas.smith145@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-146</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">AJ</div>
+                    <div>
+                      <div class="user-name">Ava Johnson</div>
+                      <div class="user-email">ava.johnson146@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-147</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">NW</div>
+                    <div>
+                      <div class="user-name">Noah Williams</div>
+                      <div class="user-email">noah.williams147@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-148</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">IB</div>
+                    <div>
+                      <div class="user-name">Isabella Brown</div>
+                      <div class="user-email">isabella.brown148@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-149</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EJ</div>
+                    <div>
+                      <div class="user-name">Ethan Jones</div>
+                      <div class="user-email">ethan.jones149@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-150</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MG</div>
+                    <div>
+                      <div class="user-name">Mia Garcia</div>
+                      <div class="user-email">mia.garcia150@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-151</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JM</div>
+                    <div>
+                      <div class="user-name">James Miller</div>
+                      <div class="user-email">james.miller151@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-152</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MD</div>
+                    <div>
+                      <div class="user-name">Mary Davis</div>
+                      <div class="user-email">mary.davis152@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-153</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RR</div>
+                    <div>
+                      <div class="user-name">Robert Rodriguez</div>
+                      <div class="user-email">robert.rodriguez153@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-154</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PM</div>
+                    <div>
+                      <div class="user-name">Patricia Martinez</div>
+                      <div class="user-email">patricia.martinez154@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-155</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JH</div>
+                    <div>
+                      <div class="user-name">John Hernandez</div>
+                      <div class="user-email">john.hernandez155@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-156</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JL</div>
+                    <div>
+                      <div class="user-name">Jennifer Lopez</div>
+                      <div class="user-email">jennifer.lopez156@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-157</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MG</div>
+                    <div>
+                      <div class="user-name">Michael Gonzalez</div>
+                      <div class="user-email">michael.gonzalez157@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-158</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LW</div>
+                    <div>
+                      <div class="user-name">Linda Wilson</div>
+                      <div class="user-email">linda.wilson158@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-159</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WA</div>
+                    <div>
+                      <div class="user-name">William Anderson</div>
+                      <div class="user-email">william.anderson159@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-160</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ET</div>
+                    <div>
+                      <div class="user-name">Elizabeth Thomas</div>
+                      <div class="user-email">elizabeth.thomas160@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-161</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DT</div>
+                    <div>
+                      <div class="user-name">David Taylor</div>
+                      <div class="user-email">david.taylor161@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-162</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BM</div>
+                    <div>
+                      <div class="user-name">Barbara Moore</div>
+                      <div class="user-email">barbara.moore162@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-163</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RJ</div>
+                    <div>
+                      <div class="user-name">Richard Jackson</div>
+                      <div class="user-email">richard.jackson163@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-164</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SM</div>
+                    <div>
+                      <div class="user-name">Susan Martin</div>
+                      <div class="user-email">susan.martin164@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-165</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JL</div>
+                    <div>
+                      <div class="user-name">Joseph Lee</div>
+                      <div class="user-email">joseph.lee165@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-166</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JP</div>
+                    <div>
+                      <div class="user-name">Jessica Perez</div>
+                      <div class="user-email">jessica.perez166@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-167</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TT</div>
+                    <div>
+                      <div class="user-name">Thomas Thompson</div>
+                      <div class="user-email">thomas.thompson167@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-168</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SW</div>
+                    <div>
+                      <div class="user-name">Sarah White</div>
+                      <div class="user-email">sarah.white168@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-169</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CH</div>
+                    <div>
+                      <div class="user-name">Charles Harris</div>
+                      <div class="user-email">charles.harris169@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-170</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KS</div>
+                    <div>
+                      <div class="user-name">Karen Sanchez</div>
+                      <div class="user-email">karen.sanchez170@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-171</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">OC</div>
+                    <div>
+                      <div class="user-name">Oliver Clark</div>
+                      <div class="user-email">oliver.clark171@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-172</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ER</div>
+                    <div>
+                      <div class="user-name">Emma Ramirez</div>
+                      <div class="user-email">emma.ramirez172@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-173</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LL</div>
+                    <div>
+                      <div class="user-name">Liam Lewis</div>
+                      <div class="user-email">liam.lewis173@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-174</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SS</div>
+                    <div>
+                      <div class="user-name">Sophia Smith</div>
+                      <div class="user-email">sophia.smith174@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-175</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LJ</div>
+                    <div>
+                      <div class="user-name">Lucas Johnson</div>
+                      <div class="user-email">lucas.johnson175@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-176</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">AW</div>
+                    <div>
+                      <div class="user-name">Ava Williams</div>
+                      <div class="user-email">ava.williams176@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-177</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">NB</div>
+                    <div>
+                      <div class="user-name">Noah Brown</div>
+                      <div class="user-email">noah.brown177@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-178</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">IJ</div>
+                    <div>
+                      <div class="user-name">Isabella Jones</div>
+                      <div class="user-email">isabella.jones178@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-179</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">EG</div>
+                    <div>
+                      <div class="user-name">Ethan Garcia</div>
+                      <div class="user-email">ethan.garcia179@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-180</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MM</div>
+                    <div>
+                      <div class="user-name">Mia Miller</div>
+                      <div class="user-email">mia.miller180@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-181</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JD</div>
+                    <div>
+                      <div class="user-name">James Davis</div>
+                      <div class="user-email">james.davis181@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-182</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MR</div>
+                    <div>
+                      <div class="user-name">Mary Rodriguez</div>
+                      <div class="user-email">mary.rodriguez182@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-183</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RM</div>
+                    <div>
+                      <div class="user-name">Robert Martinez</div>
+                      <div class="user-email">robert.martinez183@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-184</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">PH</div>
+                    <div>
+                      <div class="user-name">Patricia Hernandez</div>
+                      <div class="user-email">patricia.hernandez184@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-185</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JL</div>
+                    <div>
+                      <div class="user-name">John Lopez</div>
+                      <div class="user-email">john.lopez185@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-186</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JG</div>
+                    <div>
+                      <div class="user-name">Jennifer Gonzalez</div>
+                      <div class="user-email">jennifer.gonzalez186@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-187</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">MW</div>
+                    <div>
+                      <div class="user-name">Michael Wilson</div>
+                      <div class="user-email">michael.wilson187@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-188</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">LA</div>
+                    <div>
+                      <div class="user-name">Linda Anderson</div>
+                      <div class="user-email">linda.anderson188@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-189</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">WT</div>
+                    <div>
+                      <div class="user-name">William Thomas</div>
+                      <div class="user-email">william.thomas189@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Spain</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-190</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">ET</div>
+                    <div>
+                      <div class="user-name">Elizabeth Taylor</div>
+                      <div class="user-email">elizabeth.taylor190@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>Sweden</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-191</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">DM</div>
+                    <div>
+                      <div class="user-name">David Moore</div>
+                      <div class="user-email">david.moore191@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Ireland</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-192</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">BJ</div>
+                    <div>
+                      <div class="user-name">Barbara Jackson</div>
+                      <div class="user-email">barbara.jackson192@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Singapore</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-193</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">RM</div>
+                    <div>
+                      <div class="user-name">Richard Martin</div>
+                      <div class="user-email">richard.martin193@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Software Engineer</span></td>
+                <td>United States</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-194</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SL</div>
+                    <div>
+                      <div class="user-name">Susan Lee</div>
+                      <div class="user-email">susan.lee194@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Product Manager</span></td>
+                <td>United Kingdom</td>
+                <td>
+                  <span class="status-badge status-pending"
+                    ><span class="status-dot"></span>Pending</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-195</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JP</div>
+                    <div>
+                      <div class="user-name">Joseph Perez</div>
+                      <div class="user-email">joseph.perez195@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">UI/UX Designer</span></td>
+                <td>Canada</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-196</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">JT</div>
+                    <div>
+                      <div class="user-name">Jessica Thompson</div>
+                      <div class="user-email">jessica.thompson196@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Data Analyst</span></td>
+                <td>Germany</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-197</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">TW</div>
+                    <div>
+                      <div class="user-name">Thomas White</div>
+                      <div class="user-email">thomas.white197@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">DevOps Specialist</span></td>
+                <td>Australia</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-198</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">SH</div>
+                    <div>
+                      <div class="user-name">Sarah Harris</div>
+                      <div class="user-email">sarah.harris198@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Marketing Specialist</span></td>
+                <td>France</td>
+                <td>
+                  <span class="status-badge status-inactive"
+                    ><span class="status-dot"></span>Inactive</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-199</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">CS</div>
+                    <div>
+                      <div class="user-name">Charles Sanchez</div>
+                      <div class="user-email">charles.sanchez199@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">System Administrator</span></td>
+                <td>Japan</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td class="id-cell">#USR-200</td>
+                <td>
+                  <div class="user-profile">
+                    <div class="avatar">KC</div>
+                    <div>
+                      <div class="user-name">Karen Clark</div>
+                      <div class="user-email">karen.clark200@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-text">Sales Lead</span></td>
+                <td>Netherlands</td>
+                <td>
+                  <span class="status-badge status-active"
+                    ><span class="status-dot"></span>Active</span
+                  >
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

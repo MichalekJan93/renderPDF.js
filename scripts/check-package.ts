@@ -27,6 +27,7 @@ export function validatePackageManifest(manifest: unknown): readonly string[] {
     'CHANGELOG.md',
     'API.md',
     'LICENSE',
+    'assets/NotoSans-OFL.txt',
     'assets/renderpdf-logo.png',
     'dist/index.js',
     'dist/index.d.ts',
@@ -34,6 +35,8 @@ export function validatePackageManifest(manifest: unknown): readonly string[] {
   // Keep diagnostics independent from the inventory so duplicate entries cannot hide omissions.
   const errors: string[] = [];
   const seenPaths = new Set<string>();
+  // Exactly one lazy base-font chunk is part of the browser entry's reachable code.
+  let baseFontChunks = 0;
   const files: readonly unknown[] = packageEntry.files;
   for (const file of files) {
     if (
@@ -49,7 +52,13 @@ export function validatePackageManifest(manifest: unknown): readonly string[] {
     }
     if (seenPaths.has(file.path)) errors.push(`Duplicate package file: ${file.path}`);
     seenPaths.add(file.path);
-    if (!requiredPaths.has(file.path) && !/^dist\/[A-Za-z0-9_-]+\.d\.ts$/.test(file.path)) {
+    const isBaseFontChunk = /^dist\/base-font-[A-Za-z0-9_-]+\.js$/.test(file.path);
+    if (isBaseFontChunk) baseFontChunks += 1;
+    if (
+      !requiredPaths.has(file.path) &&
+      !isBaseFontChunk &&
+      !/^dist\/[A-Za-z0-9_-]+\.d\.ts$/.test(file.path)
+    ) {
       errors.push(`Unexpected package file: ${file.path}`);
     }
     if (!Number.isSafeInteger(file.size) || file.size <= 0) {
@@ -60,6 +69,7 @@ export function validatePackageManifest(manifest: unknown): readonly string[] {
   for (const path of requiredPaths) {
     if (!seenPaths.has(path)) errors.push(`Missing package file: ${path}`);
   }
+  if (baseFontChunks !== 1) errors.push('Expected exactly one bundled base-font JavaScript chunk.');
   return errors;
 }
 

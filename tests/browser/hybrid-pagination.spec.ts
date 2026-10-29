@@ -175,6 +175,185 @@ test('automatic local fallbacks preserve native text, nested paint ownership and
   expect(await source.evaluate((element) => element.outerHTML)).toBe(markup);
 });
 
+test('many repeated local effects keep one image and one selectable text copy per box', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await loadFixture(page);
+  // Forty distinct markers expose a repeated capture or duplicated extraction in any position.
+  const labels = Array.from(
+    { length: 40 },
+    (_, index) => `RFX${String(index + 1).padStart(2, '0')}`,
+  );
+  // The synthetic grid alternates two safe automatic fallback reasons without timing assumptions.
+  const source = page.locator('#hybrid');
+  await source.evaluate((root, markers) => {
+    root.style.width = '440px';
+    root.innerHTML = `<p>Native opening.</p><div>${markers
+      .map(
+        (marker, index) =>
+          `<div data-local-effect="${marker}" style="display: inline-block; box-sizing: border-box; width: 100px; height: 28px; margin: 2px; padding: 4px; line-height: 20px; text-align: center; color: #15283d; ${index % 2 === 0 ? 'background: linear-gradient(90deg, #dbeafe, #f9d6e5)' : 'background: #e4f4e9; box-shadow: inset 0 0 0 3px #5b3f7d'}">${marker}</div>`,
+      )
+      .join('')}</div><p>Native ending.</p>`;
+  }, labels);
+  // Both source pixels and markup are recorded before rendering touches the caller-owned DOM.
+  const browserImage = PNG.sync.read(await source.screenshot());
+  const markup = await source.evaluate((root) => root.outerHTML);
+  // Every crop comes from Chromium's measured box, independently of PDF paint coordinates.
+  const regions = await source.evaluate((root) => {
+    const origin = root.getBoundingClientRect();
+    return Array.from(root.querySelectorAll<HTMLElement>('[data-local-effect]')).map((element) => {
+      const bounds = element.getBoundingClientRect();
+      const x = Math.floor(bounds.left - origin.left);
+      const y = Math.floor(bounds.top - origin.top);
+      return {
+        marker: element.dataset.localEffect!,
+        x,
+        y,
+        width: Math.ceil(bounds.right - origin.left) - x,
+        height: Math.ceil(bounds.bottom - origin.top) - y,
+      };
+    });
+  });
+  // Public rendering owns all repeated captures; the test never calls raster internals.
+  const evidence = await page.evaluate(async () => {
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    const fonts = (window as unknown as { hybridFonts: RegisteredFont[] }).hybridFonts;
+    const result = await api.renderPDF(document.querySelector<HTMLElement>('#hybrid')!, {
+      fonts,
+      format: { width: 500, height: 460 },
+      margin: 20,
+    });
+    return {
+      bytes: Array.from(await result.toUint8Array()),
+      pageCount: result.pageCount,
+      warnings: result.warnings,
+    };
+  });
+  // PDF.js sees actual image paints and independently extracted Unicode, not planner estimates.
+  const pages = await inspect(page, evidence.bytes);
+  expect(evidence.pageCount).toBe(1);
+  expect(pages).toHaveLength(1);
+  expect(pages[0]!.imagePaints).toBe(labels.length);
+  expect(pages[0]!.imageSizes).toEqual(labels.map(() => ({ width: 200, height: 56 })));
+  expect(evidence.warnings.filter((warning) => warning.code === 'RASTER_FALLBACK')).toHaveLength(
+    labels.length,
+  );
+  const extracted = pages[0]!.text.map((item) => item.text).join('');
+  for (const phrase of ['Native opening.', ...labels, 'Native ending.']) {
+    expect(extracted.split(phrase), `${phrase} must be extracted exactly once`).toHaveLength(2);
+  }
+  // Equal-scale crops prove that each local bitmap lands inside its own browser box.
+  const pdfImage = PNG.sync.read(Buffer.from(pages[0]!.png.split(',')[1]!, 'base64'));
+  for (const region of regions) {
+    const localDifference = difference(
+      crop(pdfImage, 20 + region.x, 20 + region.y, region.width, region.height),
+      crop(browserImage, region.x, region.y, region.width, region.height),
+    );
+    expect(localDifference, region.marker).toBeLessThan(0.12);
+  }
+  expect(await source.evaluate((root) => root.outerHTML)).toBe(markup);
+});
+
+test('rounded avatars and status badges in collapsed rows remain native and selectable', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await loadFixture(page);
+  // Repeated rows model the playground directory without making timing machine-dependent.
+  const source = page.locator('#hybrid');
+  await source.evaluate((root) => {
+    // Distinct Unicode markers catch lost or duplicated text in each native rounded box.
+    const rows = [
+      ['ÁČ', 'Active'],
+      ['BŘ', 'Pending'],
+      ['ČD', 'Inactive'],
+    ];
+    root.innerHTML = `<table style="width: 320px; border-collapse: collapse"><tbody>${rows
+      .map(
+        ([initials, status], index) => `<tr>
+          <td style="padding: 8px; border: 1px solid #a5b1bd">
+            <div ${index === 0 ? 'id="native-avatar"' : index === 1 ? 'id="native-ellipse"' : ''} style="display: flex; box-sizing: border-box; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid #9ac3e9; border-radius: ${index === 1 ? '30% 60% / 45% 25%' : '50%'}; background: #dbeafe; color: #12335a; font-weight: 700">${initials}</div>
+          </td>
+          <td style="padding: 8px; border: 1px solid #a5b1bd">
+            <span ${index === 0 ? 'id="native-badge"' : ''} style="display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid #a7f3d0; border-radius: 9999px; background: #d1fae5; color: #065f46">
+              <span style="display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #10b981"></span>${status}
+            </span>
+          </td>
+        </tr>`,
+      )
+      .join('')}</tbody></table>`;
+  });
+  // The source screenshot is the independent 96-DPI reference for the exact measured boxes.
+  const browserImage = PNG.sync.read(await source.screenshot());
+  // Capture original DOM before asynchronous PDF generation to detect accidental source edits.
+  const markup = await source.evaluate((element) => element.outerHTML);
+  // These crop rectangles come from browser geometry, never the PDF operation list.
+  const regions = await source.evaluate((root) => {
+    // The root's viewport position is the common CSS-pixel origin for both outputs.
+    const origin = root.getBoundingClientRect();
+    return ['native-avatar', 'native-ellipse', 'native-badge'].map((id) => {
+      // Round the outside edges only to retain fractional browser box placement in the crop.
+      const bounds = document.getElementById(id)!.getBoundingClientRect();
+      const x = Math.floor(bounds.left - origin.left);
+      const y = Math.floor(bounds.top - origin.top);
+      return {
+        id,
+        x,
+        y,
+        width: Math.ceil(bounds.right - origin.left) - x,
+        height: Math.ceil(bounds.bottom - origin.top) - y,
+      };
+    });
+  });
+  // The public API must keep every rounded row as vector paint plus native text.
+  const evidence = await page.evaluate(async () => {
+    // The test uses the same public import as an ordinary browser consumer.
+    const modulePath = '/src/index.ts';
+    const api = (await import(/* @vite-ignore */ modulePath)) as typeof import('../../src/index');
+    // The exact face handles already used for browser layout are also embedded in the PDF.
+    const fonts = (window as unknown as { hybridFonts: RegisteredFont[] }).hybridFonts;
+    // One custom page contains all three atomic table rows without page clipping.
+    const result = await api.renderPDF(document.querySelector<HTMLElement>('#hybrid')!, {
+      fonts,
+      format: { width: 500, height: 400 },
+      margin: 20,
+    });
+    return {
+      bytes: Array.from(await result.toUint8Array()),
+      pageCount: result.pageCount,
+      warnings: result.warnings,
+    };
+  });
+  // PDF.js independently distinguishes native rounded paths from bitmap fallbacks.
+  const pages = await inspect(page, evidence.bytes);
+  expect(evidence.pageCount).toBe(1);
+  expect(pages).toHaveLength(1);
+  expect(pages[0]!.imagePaints).toBe(0);
+  expect(evidence.warnings.filter((warning) => warning.code === 'RASTER_FALLBACK')).toHaveLength(0);
+  // The three rows must retain all visible text exactly once, including Czech diacritics.
+  const extracted = pages[0]!.text
+    .map((item) => item.text)
+    .join('')
+    .replace(/\s+/g, '');
+  expect(extracted).toBe('ÁČActiveBŘPendingČDInactive');
+  // Compare local colored shapes at the same scale so page whitespace cannot mask mistakes.
+  const pdfImage = PNG.sync.read(Buffer.from(pages[0]!.png.split(',')[1]!, 'base64'));
+  const differences = regions.map((region) =>
+    difference(
+      crop(pdfImage, 20 + region.x, 20 + region.y, region.width, region.height),
+      crop(browserImage, region.x, region.y, region.width, region.height),
+    ),
+  );
+  await writeFile(
+    testInfo.outputPath('native-rounded-metrics.json'),
+    JSON.stringify({ regions, differences, warnings: evidence.warnings }, null, 2),
+  );
+  for (const ratio of differences) expect(ratio).toBeLessThan(0.08);
+  expect(await source.evaluate((element) => element.outerHTML)).toBe(markup);
+});
+
 test('CSS page breaks preserve avoid cards, wrapped lines and rowspan table intervals', async ({
   page,
 }, testInfo) => {

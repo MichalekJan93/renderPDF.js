@@ -6,6 +6,18 @@ than every changed file. The **Why** column describes the problem each change
 addresses. Release contents were checked against the Git tags, commit diffs and
 npm version history.
 
+## [0.6.1](https://www.npmjs.com/package/renderpdf-js/v/0.6.1) — 2026-10-31
+
+| What changed                                                                                                                                              | Where                                | Why                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Subset registered TrueType fonts in HTML PDFs, preserve selectable Unicode text, and group shaped glyphs into fewer PDF text operations.                  | `src/pdf.ts`, `src/text.ts`          | Reduce generated PDF size and text-writing overhead on supported documents.                       |
+| Capture local raster PNG bytes directly, preserve a sharp rectangular inset shadow in WebKit, and reject inset shadows that WebKit cannot paint reliably. | `src/raster.ts`, `README.md`         | Avoid a base64 conversion and prevent incomplete visual output from appearing successful.         |
+| Add focused Edge, Firefox, WebKit and manual Safari export checks, plus PDF writer and equal-scale visual regressions.                                    | `tests/`, `playground/`, `README.md` | Keep cross-browser claims bounded by observed behavior and catch extraction or pixel regressions. |
+| Document measured RenderPDF.js and jsPDF results for short fixtures and longer playground examples.                                                       | `README.md`                          | Show conversion, file-size and fidelity tradeoffs without treating one metric as overall quality. |
+
+HTML export remains experimental. OpenType/CFF fonts are still embedded in full,
+and these tests do not establish support for arbitrary HTML/CSS.
+
 ## [0.6.0](https://www.npmjs.com/package/renderpdf-js/v/0.6.0) — 2026-10-29
 
 | What changed                                                                                                                                                                  | Where                                                                                                    | Why                                                                                                        |

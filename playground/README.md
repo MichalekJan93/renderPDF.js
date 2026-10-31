@@ -2,7 +2,7 @@
 
 A small, independent Vite+ application for comparing the packaged RenderPDF.js library with jsPDF's HTML conversion. Upload a UTF-8 `.html`/`.htm` file (up to 10 MiB), or paste static HTML, then inspect the live preview and export both PDFs. Conversion runs in the browser; the document is not uploaded.
 
-The application imports `renderpdf-js` from the local npm archive through `file:../artifacts/renderpdf-js-0.6.0.tgz` and uses jsPDF's public `html()` API. It never imports the renderer's source directory.
+The application imports `renderpdf-js` from the local npm archive through `file:../artifacts/renderpdf-js-0.6.1.tgz` and uses jsPDF's public `html()` API. It never imports the renderer's source directory.
 
 ## Run locally
 
@@ -13,7 +13,7 @@ npm ci
 npm pack --pack-destination artifacts
 cd playground
 npm uninstall renderpdf-js
-npm install ../artifacts/renderpdf-js-0.6.0.tgz
+npm install ../artifacts/renderpdf-js-0.6.1.tgz
 npm run dev
 ```
 
@@ -40,7 +40,7 @@ Reinstalling the archive refreshes the lockfile integrity for the current local 
 npm pack --pack-destination artifacts
 cd playground
 npm uninstall renderpdf-js
-npm install ../artifacts/renderpdf-js-0.6.0.tgz
+npm install ../artifacts/renderpdf-js-0.6.1.tgz
 npm run dev
 ```
 

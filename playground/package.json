@@ -25,6 +25,6 @@
   },
   "dependencies": {
     "jspdf": "^4.2.1",
-    "renderpdf-js": "file:../artifacts/renderpdf-js-0.6.0.tgz"
+    "renderpdf-js": "file:../artifacts/renderpdf-js-0.6.1.tgz"
   }
 }

@@ -73,7 +73,7 @@ PDF.js found all 200 complete directory IDs and 1,000 complete inventory names
 in RenderPDF.js output, while one ID and one name were incomplete in the inspected
 jsPDF outputs. The visual count covers only one-page cases compared at equal scale.
 These are results for the linked source build and these fixtures on one machine;
-that build has not yet been published to npm.
+0.6.1 is the first npm release containing that build.
 
 ## Create a document
 

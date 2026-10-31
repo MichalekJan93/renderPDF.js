@@ -3,6 +3,14 @@ import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 
+/** Accept a one-level RGB rounding difference between independent canvas and PDF decoders. */
+function expectRgbNear(actual: number[], expected: readonly [number, number, number]): void {
+  expect(actual).toHaveLength(expected.length);
+  // Every channel retains a tight bound, so a missing or wrong-colored drawing still fails.
+  for (let channel = 0; channel < expected.length; channel += 1)
+    expect(Math.abs(actual[channel]! - expected[channel]!)).toBeLessThanOrEqual(1);
+}
+
 test('adapter snapshots loaded browser images and matches jsPDF text rotation directions', async ({
   page,
 }, testInfo) => {
@@ -48,7 +56,7 @@ test('adapter snapshots loaded browser images and matches jsPDF text rotation di
   expect(output!.text.find((item) => item.text === 'CW')!.transform[1]).toBeLessThan(0);
   const png = PNG.sync.read(Buffer.from(output!.png.split(',')[1]!, 'base64'));
   const offset = (20 * png.width + 20) * 4;
-  expect(Array.from(png.data.slice(offset, offset + 3))).toEqual([255, 0, 255]);
+  expectRgbNear(Array.from(png.data.slice(offset, offset + 3)), [255, 0, 255]);
   await writeFile(testInfo.outputPath('adapter-image-rotation.pdf'), Uint8Array.from(bytes));
 });
 
@@ -127,9 +135,9 @@ test('document drawing, clipped vectors, bitmap placement and flattened Czech fo
   const png = PNG.sync.read(Buffer.from(pages[0]!.png.split(',')[1]!, 'base64'));
   const sample = (x: number, y: number) =>
     Array.from(png.data.slice((y * png.width + x) * 4, (y * png.width + x) * 4 + 3));
-  expect(sample(20, 70)).toEqual([255, 0, 0]);
-  expect(sample(50, 70)).toEqual([255, 255, 255]);
-  expect(sample(110, 80)).toEqual([0, 0, 255]);
-  expect(sample(170, 80)).toEqual([0, 255, 0]);
+  expectRgbNear(sample(20, 70), [255, 0, 0]);
+  expectRgbNear(sample(50, 70), [255, 255, 255]);
+  expectRgbNear(sample(110, 80), [0, 0, 255]);
+  expectRgbNear(sample(170, 80), [0, 255, 0]);
   await writeFile(testInfo.outputPath('document-api.png'), PNG.sync.write(png));
 });

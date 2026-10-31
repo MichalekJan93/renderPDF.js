@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
@@ -27,6 +27,39 @@ interface ProbeApi {
  */
 function decodePng(dataUrl: string): PNG {
   return PNG.sync.read(Buffer.from(dataUrl.split(',')[1]!, 'base64'));
+}
+
+/** Read fixture markup without the independently encoded canvas bitmap attribute.
+ * @param source Live fixture root; cloning avoids changing its contents.
+ */
+async function markupWithoutGeneratedBitmapSource(source: Locator): Promise<string> {
+  return source.evaluate((element) => {
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.querySelector('#bitmap')?.removeAttribute('src');
+    return clone.outerHTML;
+  });
+}
+
+/** Verify the canvas bitmap's decoded pixels across independently initialized pages.
+ * @param actual Bitmap generated on the high-resolution browser page.
+ * @param expected Bitmap generated on the initial browser page.
+ */
+function expectCanvasBitmapPixelsNear(actual: PNG, expected: PNG): void {
+  expect(actual.width).toBe(expected.width);
+  expect(actual.height).toBe(expected.height);
+  // Browser canvas encoders can round an RGB channel by one without changing the image.
+  let maxRgbDifference = 0;
+  let alphaMismatchCount = 0;
+  for (let offset = 0; offset < actual.data.length; offset += 4) {
+    for (let channel = 0; channel < 3; channel += 1)
+      maxRgbDifference = Math.max(
+        maxRgbDifference,
+        Math.abs(actual.data[offset + channel]! - expected.data[offset + channel]!),
+      );
+    if (actual.data[offset + 3] !== expected.data[offset + 3]) alphaMismatchCount += 1;
+  }
+  expect(maxRgbDifference).toBeLessThanOrEqual(1);
+  expect(alphaMismatchCount).toBe(0);
 }
 
 /** Preserve a raw pixel-difference diagnostic with an explicit channel threshold.
@@ -149,6 +182,11 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
   const source = page.locator('#source');
   // Preserve initial markup and a direct browser reference before conversion.
   const originalMarkup = await source.evaluate((element) => element.outerHTML);
+  // The canvas-generated PNG may have different encoder bytes on an independent page.
+  const originalCrossPageMarkup = await markupWithoutGeneratedBitmapSource(source);
+  const originalBitmapDataUrl = await source.locator('#bitmap').getAttribute('src');
+  expect(originalBitmapDataUrl).toMatch(/^data:image\/png;base64,/);
+  const originalBitmap = decodePng(originalBitmapDataUrl!);
   // Playwright clips the element from Chromium's real rendering surface.
   const sourcePng = PNG.sync.read(await source.screenshot());
   // A separate browser surface matches the 2x capture while native-text checks stay at 96 DPI.
@@ -164,7 +202,10 @@ test('browser layout, native PDF text, local raster and two-page mapping work to
       Boolean((window as unknown as { phase0?: ProbeApi }).phase0),
     );
     const rasterSource = rasterPage.locator('#source');
-    expect(await rasterSource.evaluate((element) => element.outerHTML)).toBe(originalMarkup);
+    expect(await markupWithoutGeneratedBitmapSource(rasterSource)).toBe(originalCrossPageMarkup);
+    const rasterBitmapDataUrl = await rasterSource.locator('#bitmap').getAttribute('src');
+    expect(rasterBitmapDataUrl).toMatch(/^data:image\/png;base64,/);
+    expectCanvasBitmapPixelsNear(decodePng(rasterBitmapDataUrl!), originalBitmap);
     // Equal outer dimensions alone could hide wrapping differences under the fixture's min-height.
     rasterReferenceBounds = await rasterSource.evaluate((element) => {
       const origin = element.getBoundingClientRect();
@@ -620,6 +661,33 @@ test('unsupported CSS, unavailable faces and invalid raster sizes fail explicitl
   expect(errors[4]).toMatch(/exact registered font/i);
   expect(errors[5]).toMatch(/inline bitmap resources/i);
   expect(errors[6]).toMatch(/offsets.*fractions/i);
+});
+
+test('local raster returns decodable PNG bytes at the requested physical scale', async ({
+  page,
+}) => {
+  await page.goto('/tests/fixtures/rendering.html');
+  await page.waitForFunction(() => Boolean((window as unknown as { phase0?: ProbeApi }).phase0));
+  // Capture one connected fixture region through the same public adapter used by export.
+  const capture = await page.evaluate(async (pixelRatio) => {
+    // The fixture exposes registered font bytes and the raster entry point together.
+    const api = (window as unknown as { phase0: ProbeApi }).phase0;
+    // A stable marked region includes visible text and a background.
+    const region = document.querySelector<HTMLElement>('#source [data-raster]')!;
+    // Pixel dimensions use the capture adapter's whole-CSS-pixel canvas bounds.
+    const bounds = region.getBoundingClientRect();
+    const bytes = await api.captureRaster(region, api.fonts, pixelRatio);
+    return {
+      bytes: Array.from(bytes),
+      expectedWidth: Math.ceil(bounds.width) * pixelRatio,
+      expectedHeight: Math.ceil(bounds.height) * pixelRatio,
+    };
+  }, rasterPixelRatio);
+  // Decoding catches invalid or truncated PNG output beyond its file signature.
+  const image = PNG.sync.read(Buffer.from(capture.bytes));
+  expect(image.width).toBe(capture.expectedWidth);
+  expect(image.height).toBe(capture.expectedHeight);
+  expect(image.data.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
 });
 
 test('the demo downloads a PDF Blob without a print dialog or browser errors', async ({

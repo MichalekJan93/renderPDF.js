@@ -153,7 +153,14 @@ export async function measureJsPdf(
 ): Promise<ExportMeasurement> {
   // A4 and all margins match RenderPDF.js: 24 CSS px = 18 PDF pt.
   const startedAtMs = performance.now();
-  const document = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const document = new jsPDF({
+    orientation: 'portrait',
+    unit: 'pt',
+    format: 'a4',
+    // Compress PDF streams and avoid embedding unused faces in the optimized baseline.
+    compress: true,
+    putOnlyUsedFonts: true,
+  });
   // fontFaces may only name files visible to the same jsPDF instance; its VFS avoids URLs.
   const fontFaces = fonts.map((font, index) => {
     if (font.weight < 100 || font.weight > 900 || font.weight % 100 !== 0) {
@@ -178,7 +185,22 @@ export async function measureJsPdf(
     width: contentWidthPx * 0.75,
     windowWidth: contentWidthPx,
     autoPaging: 'text',
-    html2canvas: { logging: false },
+    html2canvas: {
+      logging: false,
+      async onclone(clonedDocument: Document): Promise<void> {
+        // html2canvas's iframe does not inherit programmatically loaded preview faces.
+        // Register the same exact bytes there before it measures and paints the clone.
+        for (const font of fonts) {
+          const face = new FontFace(font.family, Uint8Array.from(font.bytes).buffer, {
+            weight: String(font.weight),
+            style: font.style,
+          });
+          await face.load();
+          clonedDocument.fonts.add(face);
+        }
+        await clonedDocument.fonts.ready;
+      },
+    },
     // The same exact bytes and CSS descriptors used by the preview and RenderPDF.js.
     fontFaces,
   });

@@ -1,5 +1,5 @@
 import fontkit from '@pdf-lib/fontkit';
-import { PDFArray, PDFDict, PDFHexString, PDFName } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFHexString, PDFName, PDFRef } from 'pdf-lib';
 import type { Font } from '@pdf-lib/fontkit';
 import type { PDFDocument, PDFFont } from 'pdf-lib';
 import { RenderPDFError } from './diagnostics.js';
@@ -12,9 +12,11 @@ export interface PositionedGlyph {
   x: number;
   /** Vertical pen position including the font's placement offset, positive upward. */
   y: number;
+  /** Unpositioned outline advance in font units, as used by PDF's text operator. */
+  advance: number;
 }
 
-/** Reusable shaping state for one exact static font during a single export. */
+/** Reusable shaping state for one exact registered font during a single export. */
 export class PositionedFont {
   /** Original font metrics and OpenType positioning owned by this export. */
   private readonly program: Font;
@@ -30,10 +32,12 @@ export class PositionedFont {
   /** Own a shaper matching the font program embedded through pdf-lib.
    * @param font Public PDF font whose encoding remains authoritative.
    * @param bytes Exact registered program shared with browser layout.
+   * @param subset Whether the writer requested TrueType subset CIDs.
    */
   constructor(
     readonly font: PDFFont,
     bytes: Uint8Array,
+    private readonly subset = false,
   ) {
     this.program = fontkit.create(bytes);
     this.unitsPerEm = this.program.unitsPerEm;
@@ -47,9 +51,18 @@ export class PositionedFont {
     const key = `${kerning ? '1' : '0'}:${text}`;
     const previous = this.runs.get(key);
     if (previous) return previous;
-    const shaped = this.program.layout(text, { kern: kerning });
+    // pdf-lib encodes the fontkit default layout; use that exact glyph order for subset CIDs.
+    const encodedShaped = this.program.layout(text);
+    const shaped = kerning ? encodedShaped : this.program.layout(text, { kern: false });
+    // A kerning override may change positions, but cannot change glyph identities behind CIDs.
+    if (shaped.glyphs.some((glyph, index) => glyph.id !== encodedShaped.glyphs[index]?.id)) {
+      throw new RenderPDFError(
+        'PDF_WRITE_FAILED',
+        'PDF font encoding disagrees with the selected kerning layout.',
+      );
+    }
     const encoded = this.font.encodeText(text).asString();
-    // Static full-font embedding emits one two-byte CID per shaped glyph.
+    // pdf-lib assigns one two-byte CID per shaped glyph in encoded order.
     if (encoded.length !== shaped.glyphs.length * 4) {
       throw new RenderPDFError(
         'PDF_WRITE_FAILED',
@@ -60,8 +73,14 @@ export class PositionedFont {
     let y = 0;
     const positioned = shaped.glyphs.map((glyph, index) => {
       const code = encoded.slice(index * 4, index * 4 + 4);
-      // Compare actual codes rather than silently assuming another embedding strategy.
-      if (Number.parseInt(code, 16) !== glyph.id) {
+      // Public encoding determines the CID; subset CIDs no longer equal source glyph IDs.
+      if (!/^[0-9a-f]{4}$/i.test(code)) {
+        throw new RenderPDFError(
+          'PDF_WRITE_FAILED',
+          'PDF font encoding produced an invalid shaped glyph identifier.',
+        );
+      }
+      if (!this.subset && Number.parseInt(code, 16) !== glyph.id) {
         throw new RenderPDFError(
           'PDF_WRITE_FAILED',
           'PDF glyph identifiers disagree with shaping.',
@@ -90,6 +109,7 @@ export class PositionedFont {
         encoded: PDFHexString.of(code),
         x: x + position.xOffset,
         y: y + position.yOffset,
+        advance: glyph.advanceWidth,
       };
       x += position.xAdvance;
       y += position.yAdvance;
@@ -162,10 +182,14 @@ export class PositionedFont {
       'end',
     ].join('\n');
     const dictionary = document.context.lookup(this.font.ref, PDFDict);
+    // pdf-lib embeds its own CMap first; this export replaces it for shaped glyphs.
+    const previousUnicode = dictionary.get(PDFName.of('ToUnicode'));
     dictionary.set(
       PDFName.of('ToUnicode'),
       document.context.register(document.context.flateStream(cmap)),
     );
+    // The original font-owned CMap is now unreachable and must not be serialized.
+    if (previousUnicode instanceof PDFRef) document.context.delete(previousUnicode);
     // GSUB-only glyphs may be absent from pdf-lib's cmap-based default width list.
     const descendants = dictionary.lookup(PDFName.of('DescendantFonts'), PDFArray);
     const descendant = descendants.lookup(0, PDFDict);

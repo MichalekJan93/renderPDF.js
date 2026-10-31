@@ -4,6 +4,15 @@ coverage/
 test-results/
 playwright-report/
 artifacts/
+# Keep local comparison experiments and generated article evidence out of Git.
+/playground/*RESULTS*.md
+/playground/comparison.html
+/playground/comparison/
+/playground/playwright.comparison.config.ts
+/playground/scripts/comparison-report.mjs
+/playground/scripts/optimization-report.mjs
+/playground/scripts/long-visual-*.mjs
+/playground/src/comparison-*.ts
 # Keep the local security regression out of source control.
 /tests/browser/raster-resources.spec.ts
 .vite/

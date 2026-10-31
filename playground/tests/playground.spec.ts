@@ -140,8 +140,9 @@ test('playground layout, default JSON and option errors lead to an actual margin
     inputColumnBox.x + inputColumnBox.width,
   );
   expect(diagnosticsBox.x).toBeGreaterThanOrEqual(inputColumnBox.x);
+  // Cross-engine bounding boxes can differ by less than one hundredth of a CSS pixel.
   expect(diagnosticsBox.x + diagnosticsBox.width).toBeLessThanOrEqual(
-    inputColumnBox.x + inputColumnBox.width,
+    inputColumnBox.x + inputColumnBox.width + 0.01,
   );
   const htmlBox = (await page.locator('#html-input').boundingBox())!;
   const optionsBox = (await page.locator('#options-input').boundingBox())!;
@@ -407,7 +408,8 @@ test('example selector loads and resets each authored source', async ({ page }, 
     predicate: (download) => download.suggestedFilename() === 'renderpdf.pdf',
   });
   await exportButton.click();
-  await expect(page.locator('#render-result')).toContainText('Done');
+  // A thousand measured rows can exceed Playwright's default five-second expect timeout.
+  await expect(page.locator('#render-result')).toContainText('Done', { timeout: 30_000 });
   await expect(page.locator('#warnings')).toContainText('FONT_SUBSTITUTED');
   await expect(page.locator('#warnings')).toContainText('RenderPDF Base');
   const download = await downloadPromise;
@@ -495,7 +497,7 @@ test('font mismatch can fail RenderPDF.js, then exact uploaded faces remove the 
   await expect(exportButton).toBeEnabled();
   await expect(page.locator('#preview-host').locator('p')).toHaveCSS(
     'font-family',
-    '"Fixture Face"',
+    /^['"]?Fixture Face['"]?$/,
   );
 
   const downloads: Download[] = [];

@@ -6,6 +6,11 @@ import { PNG } from 'pngjs';
 import type { RenderPDFResult } from '../../src/index';
 import type { InspectedPage } from './pdf-inspector';
 
+// Render both surfaces at two physical pixels per CSS pixel so 12px glyph hinting
+// does not dominate the fixed-position comparison at native 96-DPI sampling.
+const visualScale = 2;
+test.use({ deviceScaleFactor: visualScale });
+
 /** Tight browser-measured text bounds keep blank page area out of the visual gate. */
 interface Sample {
   id: string;
@@ -48,7 +53,7 @@ test('multiple exact font faces retain kerning, ligatures, accents and wrapped t
   );
   const source = page.locator('#source');
   const browserImage = PNG.sync.read(await source.screenshot());
-  const evidence = await page.evaluate(async () => {
+  const evidence = await page.evaluate(async (pixelRatio) => {
     const root = document.querySelector<HTMLElement>('#source')!;
     const origin = root.getBoundingClientRect();
     const secondPageStart = document.querySelector('#second-page')!.getBoundingClientRect().top;
@@ -79,11 +84,11 @@ test('multiple exact font faces retain kerning, ligatures, accents and wrapped t
     )) as typeof import('./pdf-inspector');
     return {
       bytes,
-      pages: await inspector.inspectPdf(bytes),
+      pages: await inspector.inspectPdf(bytes, pixelRatio),
       samples,
       secondPageStart: secondPageStart - origin.top,
     };
-  });
+  }, visualScale);
   await writeFile(testInfo.outputPath('typography.pdf'), Buffer.from(evidence.bytes));
   await writeFile(testInfo.outputPath('browser-source.png'), PNG.sync.write(browserImage));
   const renderedPages = evidence.pages.map((pdfPage: InspectedPage) =>
@@ -91,21 +96,39 @@ test('multiple exact font faces retain kerning, ligatures, accents and wrapped t
   );
   const measurements = [];
   for (const sample of evidence.samples) {
-    const expected = crop(browserImage, sample.x, sample.y, sample.width, sample.height);
+    const expected = crop(
+      browserImage,
+      sample.x * visualScale,
+      sample.y * visualScale,
+      sample.width * visualScale,
+      sample.height * visualScale,
+    );
     const actual = crop(
       renderedPages[sample.page]!,
-      24 + sample.x,
-      Math.round(24 + sample.y - (sample.page === 1 ? evidence.secondPageStart : 0)),
-      sample.width,
-      sample.height,
+      (24 + sample.x) * visualScale,
+      Math.round(
+        (24 + sample.y - (sample.page === 1 ? evidence.secondPageStart : 0)) * visualScale,
+      ),
+      sample.width * visualScale,
+      sample.height * visualScale,
     );
-    const difference = new PNG({ width: sample.width, height: sample.height });
+    const difference = new PNG({ width: expected.width, height: expected.height });
     const ratio = differenceRatio(actual, expected, difference);
     // These corruptions prove dense crops still expose displacement or missing glyphs.
-    const shifted = new PNG({ width: sample.width, height: sample.height });
+    const shifted = new PNG({ width: expected.width, height: expected.height });
     shifted.data.fill(255);
-    PNG.bitblt(expected, shifted, 0, 0, sample.width - 2, sample.height, 2, 0);
-    const missing = new PNG({ width: sample.width, height: sample.height });
+    // Keep the displacement sentinel at two CSS pixels at either raster scale.
+    PNG.bitblt(
+      expected,
+      shifted,
+      0,
+      0,
+      expected.width - 2 * visualScale,
+      expected.height,
+      2 * visualScale,
+      0,
+    );
+    const missing = new PNG({ width: expected.width, height: expected.height });
     missing.data.fill(255);
     measurements.push({
       id: sample.id,
@@ -123,7 +146,7 @@ test('multiple exact font faces retain kerning, ligatures, accents and wrapped t
   await writeFile(
     testInfo.outputPath('metrics.json'),
     JSON.stringify(
-      { chromium: browser.version(), measurements, samples: evidence.samples },
+      { chromium: browser.version(), visualScale, measurements, samples: evidence.samples },
       null,
       2,
     ),

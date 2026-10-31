@@ -52,6 +52,17 @@ npm run check
 
 The application check builds the independent consumer and runs its browser smoke tests on port 5181. Google Chrome must be installed for the browser tests. To serve the production build separately, run `npm run preview` and open `http://127.0.0.1:5180/`.
 
+After installing Playwright Firefox and WebKit (`npx playwright install firefox webkit`)
+and making Microsoft Edge available, run `npm run build` followed by
+`npm run test:cross-browser` to repeat all twelve packaged consumer tests in
+Edge, Firefox and WebKit. The Edge project uses the installed `msedge` channel,
+or `RENDERPDF_EDGE_EXECUTABLE` can point to an absolute Edge executable. This
+suite starts its own production preview on port 5181 and runs 36 cases with one
+worker. Playwright WebKit tests the Safari engine, not the Safari application.
+Use the root's manual Safari fixture for a separate Safari.app export check.
+
+For a clearly labeled local Chromium alternative, set `PLAYGROUND_BROWSER_EXECUTABLE` to its absolute executable path before `npm run check`. The default remains the configured Google Chrome channel.
+
 The twelve Chromium tests cover two real PDF downloads, extracted Unicode text, page ownership, local raster paints, displayed measurements, HTML uploads, invalid extensions, JSON CSS and page-break settings, both source-verification modes, optional stage profiling, font upload, and preview/resource isolation including CSS `@scope`. The UI test checks logo/badge placement, the left-side export and message panels alongside a long right-side preview, the complete default options object, invalid-JSON blocking and a changed margin in an exported PDF. The profile test checks reported stages, rounded total accounting and the default unchecked path. One test exports bundled Example 1 and checks every ID stays selectable without rasterizing each row. Another loads Example 2 with all 1,000 rows, checks reset, then exports the authored Times source without font handles, checks `FONT_SUBSTITUTED`, extracts all product labels exactly once, and checks that strict mismatch reports the missing Times face. A font test checks that generic serif remains exportable, strict mode returns a RenderPDF.js error for missing custom faces while jsPDF can finish, then uploads Regular and Bold fixture files and checks extracted text from both PDFs. A text-free source test checks both exporters with the application's minimal registration. These tests do not establish equivalent visual fidelity or a reliable performance ranking across the libraries.
 
 Each timing starts immediately before conversion and ends after obtaining the PDF Blob. Preview preparation, font-file upload and browser download handling are excluded. Exports run sequentially on the same connected preview. RenderPDF.js receives the parsed JSON options; jsPDF stays at A4 portrait with 24 CSS px margins. If you change RenderPDF.js page geometry, the two outputs no longer use matching paper settings. jsPDF's HTML plugin has different CSS and pagination support, so compare the downloaded PDFs as well as the numbers; a smaller file does not imply a more faithful page. The first jsPDF export can include loading its HTML plugin dependencies and registered fonts.

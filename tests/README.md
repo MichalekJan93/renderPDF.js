@@ -2,8 +2,8 @@
 
 The suite checks the supported browser renderer, standalone image conversion,
 programmatic document drawing, PDF composition, public diagnostics, source
-ownership and npm package boundaries. The regular suite has 16 unit-test files
-and 16 Chromium spec files. Parameterized cases expand into more tests; runner
+ownership and npm package boundaries. The regular suite has 17 unit-test files
+and 17 Chromium spec files. Parameterized cases expand into more tests; runner
 output is the source of truth for their current count.
 
 All versioned inputs are synthetic. Regular checks require no private documents,
@@ -22,7 +22,14 @@ Run commands from the repository root after `npm ci`. Use the Node.js version
 described in the root [README](../README.md); `.node-version` records the verified
 runtime. Browser tests use Chromium with `channel: 'chrome'`, so install Google
 Chrome. Downloading Playwright's separate Chromium alone does not satisfy this
-configuration.
+configuration. An official Chrome executable outside the default installation
+location can be selected with `RENDERPDF_CHROME_EXECUTABLE=/absolute/path/to/chrome`.
+
+The separate cross-browser suite needs Playwright Firefox and WebKit binaries
+(`npx playwright install firefox webkit`) and Microsoft Edge. Edge can be installed
+as an application for Playwright's `msedge` channel, or its executable can be
+selected with `RENDERPDF_EDGE_EXECUTABLE=/absolute/path/to/edge`. The WebKit
+project runs Playwright's browser build, not the Safari application.
 
 The regular Playwright configuration starts its own Vite server at
 `http://127.0.0.1:5183` with a strict port and does not reuse an existing server.
@@ -42,6 +49,9 @@ tests: Vite can reload an active fixture and invalidate a test.
 | `npm test -- --run tests/pagination.test.ts`        | One unit file.                                                                                                                                        |
 | `npm test -- --run -t "keeps a complete table row"` | Unit cases matching a name.                                                                                                                           |
 | `npm run test:browser`                              | Regular Chromium suite and its automatically managed server.                                                                                          |
+| `npm run test:cross-browser`                        | Focused public-API export checks in Edge, Playwright Firefox and Playwright WebKit on port 5184.                                                      |
+| `npm run test:cross-browser -- --project firefox`   | Run only the Firefox project; `edge` and `webkit` are the other project names.                                                                        |
+| `npm run test:safari-pdf -- /path/to/download.pdf`  | Independently inspect the PDF downloaded from the manual Safari.app fixture.                                                                          |
 | `npm run test:browser -- tests/browser/api.spec.ts` | One browser spec.                                                                                                                                     |
 | `npm run test:browser -- --grep "CSS page breaks"`  | Matching browser test names.                                                                                                                          |
 | `npm run test:browser -- --headed`                  | Visible Chrome run.                                                                                                                                   |
@@ -55,9 +65,10 @@ tests: Vite can reload an active fixture and invalidate a test.
 | `npm run test:devextreme`                           | Optional integration with a separately installed DevExtreme package.                                                                                  |
 
 Unit files match `tests/**/*.test.ts` in `vite.config.ts`. Regular browser specs
-are selected from `tests/browser` by `playwright.config.ts`. The benchmark and
-DevExtreme configurations use separate directories and are outside the root
-`npm run check` command.
+are selected from `tests/browser` by `playwright.config.ts`. The cross-browser
+configuration selects the same focused spec for its three projects and is outside
+the root `npm run check` command. The benchmark and DevExtreme configurations use
+separate directories and are also outside that command.
 
 ## Unit-test coverage
 
@@ -68,6 +79,7 @@ DevExtreme configurations use separate directories and are outside the root
 | [page.test.ts](page.test.ts)                         | Standard/custom paper geometry, CSS-pixel margins, landscape axes and invalid public rendering options.                                                                                                                                                                                                                   |
 | [pagination.test.ts](pagination.test.ts)             | Consecutive source intervals, atomic lines/images/rows/rowspans, forced CSS cuts, avoid relaxation, repeated-header capacity and border-spacing accounting, invalid/oversized geometry. These are synthetic measured coordinates, not a CSS layout engine.                                                                |
 | [package.test.ts](package.test.ts)                   | Required public files/declarations including the bundled font license and base-font chunk, unintended/private/development files, duplicate/malformed inventory entries and byte counts. The generated package is checked separately by `check:package`.                                                                   |
+| [pdf-writer.test.ts](pdf-writer.test.ts)             | Shaped text uses grouped PDF text operators and a TrueType subset produces a PDF smaller than the source program. PDF.js extracts Czech, Arabic, Han from a CFF face, variable-font, ligature and combining-mark text from two pages with preserved page ownership. Browser tests establish visual fidelity separately.   |
 | [compose-pdf.test.ts](compose-pdf.test.ts)           | Merge/extract/split, selection order/duplicates, native text/vector retention, Unicode, copied bytes/options, crop/rotation, internal-link remapping, repeated donor annotations, shared builder import, invalid/form/encrypted inputs, progress and cancellation. This does not exhaust all security preflight profiles. |
 | [document-builder.test.ts](document-builder.test.ts) | DOM-free documents, mixed paper sizes, exact-font Latin/Arabic/Chinese drawing and measurement, owned inputs, page/bookmark reordering, PDF append ownership, form flattening, validation and cancellation.                                                                                                               |
 | [document-page.test.ts](document-page.test.ts)       | Imported MediaBox/UserUnit normalization, baseline/unit mapping, CJK wrapping, clipping/transforms/curves/alpha, balanced state/path validation, image ownership and interleaving rejection, links/Unicode notes, fields/appearances and portable color parsing.                                                          |
@@ -77,17 +89,22 @@ DevExtreme configurations use separate directories and are outside the root
 | [jspdf-adapter.test.ts](jspdf-adapter.test.ts)       | Prepared synchronous font metrics/wrapping, units/pages, default variable-font instance, color/state normalization, clipping/baselines, ordered owned images, both rotation directions and explicit unsupported-call rejection.                                                                                           |
 | [page-bands.test.ts](page-bands.test.ts)             | Copied reserved header/footer geometry, independent text slots, unchanged geometry when absent and malformed/exhausted band rejection.                                                                                                                                                                                    |
 | [table-borders.test.ts](table-borders.test.ts)       | Native collapsed-edge conflict winners, width/style/owner/direction ties, rowspan-side segments, corner/alpha partitioning and invalid coordinates.                                                                                                                                                                       |
-| [text.test.ts](text.test.ts)                         | Positioned kerning advances, ligatures, combining-mark anchors and explicit Unicode glyph mappings in PDF objects.                                                                                                                                                                                                        |
+| [text.test.ts](text.test.ts)                         | Positioned kerning advances, ligatures, combining-mark anchors and explicit Unicode glyph mappings in PDF objects; replacing the default CMap removes its orphaned stream.                                                                                                                                                |
 | [tiff.test.ts](tiff.test.ts)                         | Both byte orders, frame order, pixel/color/alpha modes, independently known Group 4 pixels, supported compression fixtures, malformed directories/strips/cycles, BigTIFF rejection and cancellation.                                                                                                                      |
 
 ## Regular Chromium coverage
 
+The regular Chrome runner also includes
+[browser/cross-browser.spec.ts](browser/cross-browser.spec.ts). Its dedicated
+configuration repeats the same assertions in Edge, Firefox and WebKit.
+
 | File                                                                     | Assertions covered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [browser/api.spec.ts](browser/api.spec.ts)                               | Public multipage invoice with multiple exact font faces, Flexbox/Grid, 52 table rows, native PNG and one raster; output byte/Blob/download equality and defensive copies, warnings, exact Latin extraction, measured positions, atomic rows and equal-scale browser/PDF pixels. Also font/glyph/overflow/cancellation/source-mutation failures and same-origin/CORS JPEG resources.                                                                                                                                                                                                                                                                 |
+| [browser/cross-browser.spec.ts](browser/cross-browser.spec.ts)           | Focused public `renderPDF` and `renderHTML` exports with exact licensed font bytes; PDF.js checks Czech Unicode text, two-page ownership, one local raster per page, no duplicated fallback text, and released iframe/source preservation. This bounded compatibility check does not replace the full Chrome visual suite.                                                                                                                                                                                                                                                                                                                          |
 | [browser/document.spec.ts](browser/document.spec.ts)                     | Actual upload/download of a synthetic 180-row legacy FONT/CENTER/table document, every row endpoint exactly once on its measured page, selectable Unicode text, no raster images, source preservation and first-page pixels. Active replacement HTML rejects without losing the last preview or executing its script.                                                                                                                                                                                                                                                                                                                               |
 | [browser/hybrid-pagination.spec.ts](browser/hybrid-pagination.spec.ts)   | One capture per local owner, nested opacity/paint ownership, complete extraction without duplicate raster text, native images and browser comparisons; CSS versus automatic breaks, avoid cards, wrapped lines and rowspans. Rejection probes cover unsafe effects/paint/geometry; default decorative omission and `strictCss` rejection include HTML page bands. The actual hybrid download UI is exercised.                                                                                                                                                                                                                                       |
-| [browser/phase0.spec.ts](browser/phase0.spec.ts)                         | Original two-page reusable-core experiment, Flexbox/Grid, exact regular/bold/italic faces, typography stress, two rasters and native image, page mapping and text origins. Whole-page/local/typography pixel checks, comparator sensitivity, invisible extraction text with zero visible pixel change, source/resource guards and actual download/error recovery.                                                                                                                                                                                                                                                                                   |
+| [browser/phase0.spec.ts](browser/phase0.spec.ts)                         | Original two-page reusable-core experiment, Flexbox/Grid, exact regular/bold/italic faces, typography stress, two rasters and native image, page mapping and text origins. Whole-page/local/typography pixel checks, comparator sensitivity, invisible extraction text with zero visible pixel change, decodable raster PNG bytes at the requested physical scale, source/resource guards and actual download/error recovery.                                                                                                                                                                                                                       |
 | [browser/export-preparation.spec.ts](browser/export-preparation.spec.ts) | One image decode per export, two full fingerprints without warnings/three with warnings, late CSSOM edit rejection despite zero DOM mutation records. Counts structural work instead of machine-dependent time.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | [browser/prepare.spec.ts](browser/prepare.spec.ts)                       | Stable repeated guards; standard/custom CSS value swaps, property addition/removal/rename, pseudo geometry and external Flexbox sibling width changes without DOM mutation records; restoration returns to valid state.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | [browser/collapsed-tables.spec.ts](browser/collapsed-tables.spec.ts)     | Browser pixels, alpha, shared-edge ownership, colspan/rowspan and RTL tie resolution; transparent table cells omit paintless PDF boxes while preserving colored cells, borders and text; ASCII table-cell wrapping retains measured browser fragments; later paint overlapping text across a vertical index boundary rejects; repeated headers and complete selectable rows; outer half-borders avoid border-only pages; unsupported styles/contributions reject.                                                                                                                                                                                   |
@@ -119,6 +136,25 @@ paint and one selectable text copy per box, while equal-scale crops check each
 box at its measured browser position and the source markup remains unchanged.
 It has no machine-dependent time threshold.
 
+The dedicated `npm run test:cross-browser` configuration runs the focused spec
+in actual Microsoft Edge, Playwright Firefox and Playwright WebKit. It compares
+the two local raster crops with same-browser screenshots at 96 DPI using
+Pixelmatch threshold 0.1, antialiasing excluded, and the existing 5% gate. It
+also checks actual downloaded bytes against the public result and verifies that
+blurred root and nested descendant inset shadows fail explicitly in WebKit. The
+two WebKit-only negative cases are skipped in Edge and Firefox. This suite does
+not automate Safari.app or cover
+every supported CSS feature there.
+
+For the manual Safari.app check, start `npm run dev -- --port 5196 --strictPort`,
+open `http://127.0.0.1:5196/tests/fixtures/safari-smoke.html` in Safari and click
+**Download PDF**. The status must report two pages, two raster-fallback warnings
+and unchanged source. Run `npm run test:safari-pdf -- /path/to/renderpdf-safari-smoke.pdf`
+on that exact download. The independent PDF.js inspector checks the PDF header,
+two pages, correct Czech Unicode text and one local image paint on each page.
+It prints the byte count and SHA-256 for audit. This does not measure Safari
+visual pixels or enable Safari remote automation.
+
 ## Optional integration and benchmark suites
 
 `npm run benchmark` builds the library, then runs
@@ -137,7 +173,7 @@ rows through the adapter, checking Unicode text, truncation, headers and two-par
 footers. This optional test does not establish support for every jsPDF plugin.
 
 The independent [playground](../playground/README.md) has its own `npm ci` and
-`npm run check`. Its twelve Chromium tests cover both actual PDF downloads,
+`npm run check`. Its twelve regular Chromium tests cover both actual PDF downloads,
 extraction/margins/timing-and-size metrics, legacy metadata, HTML upload/file
 validation, strict-CSS and page-break JSON options, optional stage profiling with
 rounded total accounting, both source-verification modes and their warning,
@@ -151,6 +187,11 @@ with a changed margin. The other option tests check strict CSS rejection and PDF
 page ownership after changing JSON values. Root `npm run check` does not run the
 playground; CI packs the library and tests that installed consumer separately.
 Packaging/reinstallation instructions are in its README.
+Its separate `npm run test:cross-browser` configuration repeats the twelve tests
+per engine in Edge, Firefox and Playwright WebKit after a production build. The
+geometry assertion allows 0.01 CSS px of browser floating-point rounding,
+the 1,000-row result wait allows 30 seconds, and the font-family assertion
+accepts equivalent CSS serialization with or without quotes.
 Bundled [Example 1](../playground/src/examples/example-1.html) is a static 200-row
 directory. A playground test exports it through the installed package and checks
 all 200 selectable IDs in order, five local raster paints outside its rows and
@@ -171,31 +212,47 @@ family as a JSON fallback for a different missing CSS face. No test asserts a
 machine-dependent export time or bundles proprietary system fonts. A text-free
 source test verifies both exporters with the application's minimal base handle.
 
+The regular playground browser suite accepts `PLAYGROUND_BROWSER_EXECUTABLE`
+for a separately labeled Chromium alternative; its default remains Chrome.
+
 ## Fixtures, helpers and evidence
 
-| Path                                                                                                                                                                       | Purpose                                                                                            |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| [fixtures/rendering.html](fixtures/rendering.html)                                                                                                                         | Basic two-page experiment and download UI.                                                         |
-| [fixtures/invoice.html](fixtures/invoice.html)                                                                                                                             | Public API/resource/preparation entry; tests create synthetic document variants.                   |
-| [fixtures/hybrid-pages.html](fixtures/hybrid-pages.html), [fixtures/hybrid.html](fixtures/hybrid.html)                                                                     | Automatic local effects, CSS cuts and the mixed-content download UI.                               |
-| [fixtures/document.html](fixtures/document.html), [fixtures/legacy-statement.html](fixtures/legacy-statement.html)                                                         | Isolated local upload preview and generated 180-row legacy template.                               |
-| [fixtures/collapsed-tables.html](fixtures/collapsed-tables.html), [fixtures/page-bands.html](fixtures/page-bands.html)                                                     | Native table-border and repeated-header/band sources.                                              |
-| [fixtures/typography.html](fixtures/typography.html), [fixtures/variable-font.html](fixtures/variable-font.html), [fixtures/multilingual.html](fixtures/multilingual.html) | Exact-face shaping, variable-default and multilingual samples.                                     |
-| [fixtures/benchmark.html](fixtures/benchmark.html), [fixtures/benchmark.ts](fixtures/benchmark.ts)                                                                         | Separate built-library timing harness.                                                             |
-| [fixtures/devextreme.html](fixtures/devextreme.html), [fixtures/devextreme.ts](fixtures/devextreme.ts)                                                                     | Optional real-grid adapter harness.                                                                |
-| [helpers/image-fixtures.ts](helpers/image-fixtures.ts)                                                                                                                     | Small synthetic encoded image builders for image validation/decoding assertions.                   |
-| [browser/pdf-inspector.ts](browser/pdf-inspector.ts)                                                                                                                       | Development-only PDF.js extraction, text transforms, font/image operations and page PNG rendering. |
-| `public/fonts/`                                                                                                                                                            | Explicit licensed Noto/Roboto fixture fonts and original third-party license notices.              |
+| Path                                                                                                                                                                       | Purpose                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [fixtures/rendering.html](fixtures/rendering.html)                                                                                                                         | Basic two-page experiment and download UI.                                                           |
+| [fixtures/invoice.html](fixtures/invoice.html)                                                                                                                             | Public API/resource/preparation entry; tests create synthetic document variants.                     |
+| [fixtures/hybrid-pages.html](fixtures/hybrid-pages.html), [fixtures/hybrid.html](fixtures/hybrid.html)                                                                     | Automatic local effects, CSS cuts and the mixed-content download UI.                                 |
+| [fixtures/safari-smoke.html](fixtures/safari-smoke.html)                                                                                                                   | Manual Safari.app export with public API, two pages, Czech Unicode, gradient and sharp inset raster. |
+| [fixtures/document.html](fixtures/document.html), [fixtures/legacy-statement.html](fixtures/legacy-statement.html)                                                         | Isolated local upload preview and generated 180-row legacy template.                                 |
+| [fixtures/collapsed-tables.html](fixtures/collapsed-tables.html), [fixtures/page-bands.html](fixtures/page-bands.html)                                                     | Native table-border and repeated-header/band sources.                                                |
+| [fixtures/typography.html](fixtures/typography.html), [fixtures/variable-font.html](fixtures/variable-font.html), [fixtures/multilingual.html](fixtures/multilingual.html) | Exact-face shaping, variable-default and multilingual samples.                                       |
+| [fixtures/benchmark.html](fixtures/benchmark.html), [fixtures/benchmark.ts](fixtures/benchmark.ts)                                                                         | Separate built-library timing harness.                                                               |
+| [fixtures/devextreme.html](fixtures/devextreme.html), [fixtures/devextreme.ts](fixtures/devextreme.ts)                                                                     | Optional real-grid adapter harness.                                                                  |
+| [helpers/image-fixtures.ts](helpers/image-fixtures.ts)                                                                                                                     | Small synthetic encoded image builders for image validation/decoding assertions.                     |
+| [browser/pdf-inspector.ts](browser/pdf-inspector.ts)                                                                                                                       | Development-only PDF.js extraction, text transforms, font/image operations and page PNG rendering.   |
+| [inspect-safari-smoke.mjs](inspect-safari-smoke.mjs)                                                                                                                       | Independent CLI assertions for the file downloaded from the manual Safari.app fixture.               |
+| `public/fonts/`                                                                                                                                                            | Explicit licensed Noto/Roboto fixture fonts and original third-party license notices.                |
 
 PDF.js normally renders at `1 / 0.75` scale so one CSS reference pixel equals
-0.75 PDF points. Phase 0 retains its 96-DPI page, typography and comparator-sentinel
-checks, but compares bounded local rasters at their native 2x resolution (192 DPI).
+0.75 PDF points. Phase 0 retains its 96-DPI page and comparator-sentinel checks,
+but compares bounded local rasters at their native 2x resolution (192 DPI).
 A separate device-scale-2 browser reference and PDF.js scale `2 / 0.75` avoid
 comparing downsampled raster text against directly rasterized 96-DPI browser text.
 CSS crop coordinates and margins scale together; no alignment, blur, fixture-text
 changes or tolerance increases are applied. Fitted-output tests apply the measured fit scale to their
 browser reference. Comparisons preserve coordinates; tests do not align or blur
 images to improve a score.
+
+The dedicated typography fixture also compares equal-size browser/PDF text crops
+at 2x physical resolution. Its 12px sample had a 2.65% difference at 96 DPI in
+local Chrome and Brave despite matching glyph bounds; both renderers at 2x brought
+that sample below 0.01% without changing the 2% gate or CSS-pixel coordinates.
+Its two-CSS-pixel displacement and blank-text sentinels remain above 5% at 2x.
+The document-builder probes allow at most one RGB channel value of independent
+PDF.js/canvas rounding on representative solid-color samples. The Phase 0
+cross-page markup check excludes only the independently generated bitmap `src`,
+then checks decoded bitmap dimensions, identical alpha and at most one RGB
+channel value of drift; the same-page post-export DOM must still match exactly.
 
 Pixelmatch uses `threshold: 0.1` and `includeAA: false`. Gates vary by asserted
 region: standard whole-page/typography checks are below 2%, bounded hybrid rasters
@@ -213,8 +270,9 @@ generated evidence or use supplied private documents as versioned fixtures.
 
 ## Boundaries and maintenance
 
-These assertions establish bounded synthetic cases in Chrome. They do not prove
-arbitrary HTML/CSS support, Firefox/Safari compatibility, every font/script,
+These assertions establish bounded synthetic cases in Chrome and focused API
+cases in Edge, Firefox and Playwright WebKit. They do not prove arbitrary
+HTML/CSS support or general Safari application compatibility, every font/script,
 vocalized-Arabic extraction, nondefault variable axes, accessibility tagging or
 exhaustive malicious-input protection. Collapsed borders and repeated headers
 cover the supported profiles described in the root README, not all CSS tables.

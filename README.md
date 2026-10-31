@@ -18,9 +18,12 @@ HTML exports use the browser's layout, keep text selectable and split content
 across pages. Document creation and PDF composition also work in Node.js,
 without a DOM.
 
-**Experimental.** HTML rendering is tested in Google Chrome; a basic export also
-passed in Microsoft Edge. Firefox and Safari have not been verified. Supported
-HTML and CSS are [described below](#supported-scope).
+**Experimental.** The full browser suite targets Google Chrome. Focused HTML
+export tests also pass in Microsoft Edge, Playwright Firefox and Playwright
+WebKit, including PDF downloads, page mapping, selectable Unicode text and local
+raster comparisons. A separate manual export passed in Safari 26.2. These are
+bounded tests, not a general HTML/CSS compatibility guarantee. Supported behavior
+and limits are [described below](#supported-scope).
 
 ## Features
 
@@ -476,9 +479,10 @@ scripts when the bundled or supplied font covers the characters used:
 
 Set the source text's `lang` and `dir` where needed, and register suitable font
 faces for each CSS `font-family`. Other scripts have not been verified. Vertical
-writing modes are unsupported. HTML export currently embeds complete font
-programs, so a large Chinese font can substantially increase PDF size; the
-programmatic document API subsets embedded fonts.
+writing modes are unsupported. HTML export subsets registered TrueType font
+programs to the glyphs used in the PDF. OpenType/CFF fonts are embedded in full;
+a large Chinese CFF font can therefore substantially increase PDF size. The
+programmatic document API requests subsetting for embedded fonts.
 Arabic vowel marks render, but PDF text extraction can move a mark around a
 ligature; vocalized Arabic is not yet covered by the selectable-text guarantee.
 
@@ -498,6 +502,11 @@ responsive images (`<picture>`, `<source>` and `img[srcset]`), external resource
 transforms and backdrop effects are unsupported. Outer shadows on native elements
 and selected raster roots are omitted by default; `strictCss: true` rejects them.
 Outer shadows on descendants inside an existing raster region still reject.
+WebKit's SVG image painter drops inset box shadows. The raster fallback preserves
+a single sharp, rectangular inset stroke without an existing border by painting
+an equivalent inner outline in its temporary clone. Other inset shadows in
+WebKit, including blurred, layered or descendant inset shadows, fail with
+`RASTER_FAILED` rather than silently producing incomplete pixels.
 Inline event handlers and custom elements, including customized built-ins, are
 rejected before capture so cloning cannot repeat their application callbacks.
 Wrapped inline backgrounds or borders require a containing raster region; inline
@@ -599,8 +608,11 @@ npm run check
 ```
 
 `npm run check` runs formatting, lint, types, unit tests, browser tests, build and
-package checks. Google Chrome must be installed for browser tests. Vite+ provides
+package checks. Google Chrome must be available for browser tests, either as an
+installed app or through `RENDERPDF_CHROME_EXECUTABLE`. Vite+ provides
 the development toolchain; Playwright and PDF.js are used for testing.
+`npm run test:cross-browser` runs the focused Edge, Firefox and WebKit matrix;
+its browser prerequisites and limits are in [tests/README.md](tests/README.md).
 
 Run `npm run dev` to serve synthetic test fixtures. The independent
 [playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playground)

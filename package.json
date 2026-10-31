@@ -59,6 +59,8 @@
     "typecheck": "vp check --no-fmt --no-lint",
     "test": "vp test",
     "test:browser": "playwright test",
+    "test:cross-browser": "playwright test --config playwright.cross-browser.config.ts",
+    "test:safari-pdf": "node tests/inspect-safari-smoke.mjs",
     "test:devextreme": "playwright test --config playwright.devextreme.config.ts",
     "benchmark": "npm run build:library && playwright test --config playwright.benchmark.config.ts",
     "lint": "vp lint",

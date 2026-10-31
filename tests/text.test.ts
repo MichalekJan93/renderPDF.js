@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { PDFDict, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
+import { PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, decodePDFRawStream } from 'pdf-lib';
 import { describe, expect, it } from 'vite-plus/test';
 import { PositionedFont } from '../src/text';
 
@@ -47,8 +47,13 @@ describe('positioned PDF text', () => {
     const { document, font, positioned } = await face();
     const ligature = positioned.shape('ffi')[0]!;
     const marked = positioned.shape('a\u0301')[1]!;
-    await positioned.embedUnicode(document);
+    // Embed the dependency's default map first to check that replacement removes its orphan.
+    await font.embed();
     const dictionary = document.context.lookup(font.ref, PDFDict);
+    const previousUnicode = dictionary.get(PDFName.of('ToUnicode'));
+    expect(previousUnicode).toBeInstanceOf(PDFRef);
+    await positioned.embedUnicode(document);
+    expect(document.context.lookup(previousUnicode)).toBeUndefined();
     const stream = document.context.lookup(dictionary.get(PDFName.of('ToUnicode')));
     if (!(stream instanceof PDFRawStream)) throw new Error('Missing Unicode CMap stream.');
     const cmap = new TextDecoder().decode(decodePDFRawStream(stream).decode());

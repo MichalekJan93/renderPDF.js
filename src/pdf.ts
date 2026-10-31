@@ -1,6 +1,11 @@
 import fontkit from '@pdf-lib/fontkit';
 import {
   PDFDocument,
+  PDFArray,
+  PDFHexString,
+  PDFNumber,
+  PDFOperator,
+  PDFOperatorNames,
   beginText,
   clip,
   endPath,
@@ -27,6 +32,7 @@ import type { PageText, PreparedPageBand } from './page-bands.js';
 import type { PageSlice } from './pagination.js';
 import { captureRaster, prepareRasterFontCss } from './raster.js';
 import { PositionedFont } from './text.js';
+import type { PositionedGlyph } from './text.js';
 import type {
   Bounds,
   LayoutSnapshot,
@@ -40,6 +46,15 @@ const PX_TO_PT = 0.75;
 
 /** Approximate each quarter ellipse with one cubic PDF path segment. */
 const QUARTER_ELLIPSE = (4 / 3) * Math.tan(Math.PI / 8);
+
+/** Permit subsetting only the TrueType SFNT flavor verified by the browser suite. */
+function canSubsetTrueType(
+  /** Registered font bytes, before pdf-lib parses the program. */
+  bytes: Uint8Array,
+): boolean {
+  // fontkit's CFF subset stream is not accepted by PDF.js for the registered OTF fixtures.
+  return bytes.length >= 4 && bytes[0] === 0 && bytes[1] === 1 && bytes[2] === 0 && bytes[3] === 0;
+}
 
 /** Build a closed SVG path in local top-left CSS pixel coordinates. */
 function roundedRectanglePath(
@@ -188,6 +203,55 @@ interface TextResources {
   opacity: Map<number, PDFName>;
 }
 
+/** Emit one text-show operator for each constant-height shaped span. */
+function drawPositionedRun(
+  /** Page whose PDF font widths match the shaped glyph advances. */
+  page: PDFPage,
+  /** Glyph origins and nominal advances in the embedded font's units. */
+  glyphs: readonly PositionedGlyph[],
+  /** Measured browser run origin converted to PDF points. */
+  x: number,
+  /** Browser baseline converted to PDF points. */
+  baseline: number,
+  /** PDF points per font unit for this text size. */
+  scale: number,
+  /** Font units per em used by PDF TJ spacing adjustments. */
+  unitsPerEm: number,
+): void {
+  // A TJ array adjusts only horizontal placement; different vertical offsets need a new matrix.
+  for (let firstIndex = 0; firstIndex < glyphs.length;) {
+    // Each span owns its first origin, encoded CID bytes and optional spacing array.
+    const first = glyphs[firstIndex]!;
+    let nextIndex = firstIndex + 1;
+    let encoded = first.encoded.asString();
+    let adjusted: PDFArray | undefined;
+    for (; nextIndex < glyphs.length && glyphs[nextIndex]!.y === first.y; nextIndex += 1) {
+      // Consecutive origins are compared against the previous glyph's PDF advance.
+      const previous = glyphs[nextIndex - 1]!;
+      const current = glyphs[nextIndex]!;
+      // Positive TJ values move the pen left; the difference preserves kerning and mark offsets.
+      const adjustment = ((previous.x + previous.advance - current.x) * 1000) / unitsPerEm;
+      if (adjustment !== 0) {
+        adjusted ??= PDFArray.withContext(page.doc.context);
+        adjusted.push(PDFHexString.of(encoded));
+        adjusted.push(PDFNumber.of(adjustment));
+        encoded = '';
+      }
+      encoded += current.encoded.asString();
+    }
+    // Unadjusted spans serialize as one short Tj; only spaced spans need TJ arrays.
+    const textOperator = adjusted
+      ? (adjusted.push(PDFHexString.of(encoded)),
+        PDFOperator.of(PDFOperatorNames.ShowTextAdjusted, [adjusted]))
+      : showText(PDFHexString.of(encoded));
+    page.pushOperators(
+      setTextMatrix(1, 0, 0, 1, x + first.x * scale, baseline + first.y * scale),
+      textOperator,
+    );
+    firstIndex = nextIndex;
+  }
+}
+
 /** Paint shaped glyphs at measured run origins without scaling glyph outlines. */
 function drawLine(
   /** PDF page owning this complete measured line. */
@@ -234,12 +298,14 @@ function drawLine(
     (geometry.height - geometry.margin.top - (text.baseline - start) * sourceScale) * PX_TO_PT;
   for (const run of text.runs) {
     const x = (geometry.margin.left + run.x * sourceScale) * PX_TO_PT;
-    for (const glyph of face.positioned.shape(run.text, text.kerning ?? true)) {
-      page.pushOperators(
-        setTextMatrix(1, 0, 0, 1, x + glyph.x * scale, baseline + glyph.y * scale),
-        showText(glyph.encoded),
-      );
-    }
+    drawPositionedRun(
+      page,
+      face.positioned.shape(run.text, text.kerning ?? true),
+      x,
+      baseline,
+      scale,
+      face.positioned.unitsPerEm,
+    );
   }
   page.pushOperators(endText(), popGraphicsState());
 }
@@ -479,17 +545,20 @@ export async function writePDF(
     let resourceCompleted = 0;
     if (options.reportProgress)
       await options.reportProgress({ stage: 'resources', completed: 0, total: resourceTotal });
-    // Full embedding avoids subset/ligature mapping complications without using private APIs.
+    // Subset CIDs are mapped back to shaped Unicode after all text is drawn.
     const faces: EmbeddedFace[] = [];
     for (const definition of embeddedDefinitions) {
       throwIfAborted(options.signal);
       // Cache coverage once per embedded face rather than rebuilding it for every line.
-      const font = await pdf.embedFont(definition.bytes);
+      const subset = canSubsetTrueType(definition.bytes);
+      const font = await pdf.embedFont(definition.bytes, {
+        subset,
+      });
       faces.push({
         definition,
         font,
         characters: new Set(font.getCharacterSet()),
-        positioned: new PositionedFont(font, definition.bytes),
+        positioned: new PositionedFont(font, definition.bytes, subset),
       });
       resourceCompleted += 1;
       if (options.reportProgress)

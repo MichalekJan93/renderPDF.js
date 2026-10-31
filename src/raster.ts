@@ -1,4 +1,4 @@
-import { toPng } from 'html-to-image';
+import { toBlob } from 'html-to-image';
 import type { RegisteredFont } from './api-types.js';
 import { RenderPDFError } from './diagnostics.js';
 import { computedStyle, isHtmlElement, isHtmlTag } from './dom.js';
@@ -80,6 +80,8 @@ function assertSelfContained(
 ): void {
   // Bounds permit inner clipping but reject descendants painted outside the capture.
   const rootBounds = element.getBoundingClientRect();
+  // WebKit's SVG foreignObject painter drops inset shadows on cloned descendants.
+  const isWebKit = element.ownerDocument.defaultView?.navigator.vendor === 'Apple Computer, Inc.';
   // Include the region itself when checking resources and context-dependent effects.
   const descendants = [element, ...element.querySelectorAll('*')];
   // Reuse one browser range to distinguish painted text from hidden descendants.
@@ -270,6 +272,19 @@ function assertSelfContained(
     // Ignore hidden descendants, whose zero geometry cannot escape the capture.
     const bounds = descendant.getBoundingClientRect();
     if (
+      isWebKit &&
+      descendant !== element &&
+      style.visibility === 'visible' &&
+      bounds.width > 0 &&
+      bounds.height > 0 &&
+      /\binset\b/.test(style.boxShadow)
+    ) {
+      throw new RenderPDFError(
+        'RASTER_FAILED',
+        'WebKit raster capture cannot reproduce inset shadows on descendants of a selected raster region.',
+      );
+    }
+    if (
       bounds.width > 0 &&
       bounds.height > 0 &&
       (bounds.left < rootBounds.left - 0.5 ||
@@ -283,6 +298,45 @@ function assertSelfContained(
       );
     }
   }
+}
+
+/** Paint a sharp inset stroke as an equivalent inner outline in WebKit's SVG clone.
+ * WebKit drops CSS inset box shadows inside a foreignObject image. This narrow
+ * replacement preserves the measured border box and child content coordinates.
+ */
+function webkitSharpInsetStyle(
+  /** Computed paint and box metrics of the selected source root. */
+  style: CSSStyleDeclaration,
+): { boxShadow: string; outline: string; outlineOffset: string } | null {
+  // An inner outline cannot substitute blur, offset, multiple shadows or rounded corners.
+  const match = /^(rgb(?:a)?\([^)]+\)) 0px 0px 0px ([\d.]+)px inset$/.exec(style.boxShadow);
+  if (!match || style.boxSizing !== 'border-box') return null;
+  const spreadPx = Number(match[2]);
+  if (!Number.isInteger(spreadPx) || spreadPx <= 0) return null;
+  const sides = ['Top', 'Right', 'Bottom', 'Left'] as const;
+  const paddingPx = sides.map((side) => Number.parseFloat(style[`padding${side}`]));
+  const squareCorners = [
+    style.borderTopLeftRadius,
+    style.borderTopRightRadius,
+    style.borderBottomRightRadius,
+    style.borderBottomLeftRadius,
+  ].every((radius) => Number.parseFloat(radius) === 0);
+  if (
+    !squareCorners ||
+    sides.some(
+      (side, index) =>
+        Number.parseFloat(style[`border${side}Width`]) !== 0 ||
+        style[`border${side}Style`] !== 'none' ||
+        !Number.isFinite(paddingPx[index]) ||
+        paddingPx[index]! < spreadPx,
+    )
+  )
+    return null;
+  return {
+    boxShadow: 'none',
+    outline: `${spreadPx}px solid ${match[1]}`,
+    outlineOffset: `-${spreadPx}px`,
+  };
 }
 
 /**
@@ -360,23 +414,33 @@ export async function captureRaster(
 
   assertSelfContained(element, fonts, omitOuterShadow, fontFallback);
   // Keep inset layers while dropping any shadow that paints outside the selected border box.
-  const insetShadows = computedStyle(element)
-    .boxShadow.split(/,(?![^(]*\))/)
+  const rootStyle = computedStyle(element);
+  const insetShadows = rootStyle.boxShadow
+    .split(/,(?![^(]*\))/)
     .filter((shadow) => /\binset\b/.test(shadow))
     .join(', ');
+  // WebKit's foreignObject painter omits inset box shadows despite preserving their CSS.
+  const isWebKit = element.ownerDocument.defaultView.navigator.vendor === 'Apple Computer, Inc.';
+  const webkitCloneStyle = isWebKit && insetShadows ? webkitSharpInsetStyle(rootStyle) : null;
+  if (isWebKit && insetShadows && !webkitCloneStyle) {
+    throw new RenderPDFError(
+      'RASTER_FAILED',
+      'WebKit raster capture cannot reproduce this inset shadow; only a single sharp rectangular inset stroke without an existing border is supported.',
+    );
+  }
   // Supplying fontEmbedCSS bypasses stylesheet scanning and external font requests.
   const fontEmbedCSS = preparedFontCss ?? prepareRasterFontCss(fonts);
   // html-to-image 1.11.13 floors font-size and subtracts 0.1px; copy the exact font shorthand first instead.
   // Upstream behavior: https://github.com/bubkoo/html-to-image/blob/v1.11.13/src/clone-node.ts#L139-L143
   const includeStyleProperties = [
     'font',
-    ...Array.from(computedStyle(element)).filter(
+    ...Array.from(rootStyle).filter(
       /** Preserve every other computed longhand after setting the exact font shorthand. */
       (property) => property !== 'font-size',
     ),
   ];
   // html-to-image clones computed styles; only the selected root's placement is normalized.
-  const dataUrl = await toPng(element, {
+  const blob = await toBlob(element, {
     width: captureWidth,
     height: captureHeight,
     pixelRatio: scale,
@@ -395,18 +459,13 @@ export async function captureRaster(
       height: `${height}px`,
       transform: `translate(${offset.x}px, ${offset.y}px)`,
       ...(omitOuterShadow ? { boxShadow: insetShadows || 'none' } : {}),
+      ...webkitCloneStyle,
     },
   });
-  // Decode only the generated local data URL; no fetch or upload occurs here.
-  const payload = dataUrl.match(/^data:image\/png;base64,(.+)$/)?.[1];
-  if (!payload) {
+  // The same canvas pixels are encoded as PNG directly, without a base64 round trip.
+  if (!blob || blob.type !== 'image/png' || blob.size === 0) {
     throw new RenderPDFError('RASTER_FAILED', 'Raster capture produced an empty or invalid PNG.');
   }
-  // Decoded bytes can be embedded directly by the isolated PDF writer.
-  const binary = atob(payload);
-  return Uint8Array.from(
-    binary,
-    /** Byte value at the current position in the binary PNG string. */
-    (character) => character.charCodeAt(0),
-  );
+  // The owned byte copy can be embedded directly by the isolated PDF writer.
+  return new Uint8Array(await blob.arrayBuffer());
 }

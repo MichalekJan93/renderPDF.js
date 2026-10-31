@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RenderPDF.js browser download check</title>
+    <style>
+      body {
+        margin: 24px;
+        font:
+          16px/24px system-ui,
+          sans-serif;
+      }
+      #source {
+        display: flow-root;
+        width: 460px;
+        font: 14px/20px 'Hybrid Sans';
+      }
+      #source h1,
+      #source h2,
+      #source p {
+        margin: 0;
+      }
+      #source h1,
+      #source h2 {
+        font-size: 20px;
+        line-height: 28px;
+      }
+      .gradient {
+        box-sizing: border-box;
+        width: 420px;
+        height: 100px;
+        padding: 12px;
+        margin: 12px 0;
+        border-radius: 10px;
+        background: linear-gradient(110deg, #dbeafa, #f0dff8);
+      }
+      .inset {
+        box-sizing: border-box;
+        width: 420px;
+        height: 64px;
+        padding: 12px;
+        margin: 12px 0;
+        box-shadow: inset 0 0 0 4px #5b3f7d;
+        background: #e4f4e9;
+        opacity: 0.85;
+      }
+      .second-page {
+        break-before: page;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Browser PDF download check</h1>
+      <button id="export" type="button" disabled>Download PDF</button>
+      <p id="status" role="status">Loading licensed fixture font…</p>
+    </header>
+    <main id="source">
+      <h1>PAGEONE č</h1>
+      <p>Native opening: selectable text.</p>
+      <div class="gradient">RASTERONE Czech Unicode sample: áčďéěíňóřšťúůýž.</div>
+      <p>Native text before the page break.</p>
+      <h2 class="second-page">PAGETWO ž</h2>
+      <div class="inset">RASTERTWO follows the forced page break.</div>
+      <p>Native ending: second page text.</p>
+    </main>
+    <script type="module">
+      import { registerFont, renderPDF } from '/src/index.ts';
+
+      /** Run one browser-owned export through the public library and download its actual bytes. */
+      async function initialize() {
+        // The source and controls stay separate so status updates cannot alter PDF layout.
+        const source = document.querySelector('#source');
+        const button = document.querySelector('#export');
+        const status = document.querySelector('#status');
+        // These licensed regular and heading faces are shared by layout and embedding.
+        const fonts = await Promise.all(
+          ['Regular', 'Bold'].map(async (face) => {
+            const response = await fetch(`/fonts/NotoSans-${face}.ttf`);
+            if (!response.ok) throw new Error(`Fixture font loading failed: ${face}.`);
+            return registerFont({
+              family: 'Hybrid Sans',
+              weight: face === 'Bold' ? 700 : 400,
+              data: await response.arrayBuffer(),
+            });
+          }),
+        );
+        await document.fonts.ready;
+        button.disabled = false;
+        status.textContent = 'Ready.';
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          status.textContent = 'Creating PDF…';
+          // Retain the exact caller-owned markup for a post-export mutation check.
+          const markup = source.outerHTML;
+          try {
+            const result = await renderPDF(source, {
+              fonts,
+              format: { width: 500, height: 400 },
+              margin: 20,
+            });
+            const bytes = await result.toUint8Array();
+            await result.download('renderpdf-safari-smoke.pdf');
+            if (source.outerHTML !== markup) throw new Error('Source DOM changed during export.');
+            status.textContent = `${result.pageCount} pages, ${bytes.length} bytes, warnings: ${result.warnings.map((warning) => warning.code).join(', ') || 'none'}; source unchanged.`;
+          } catch (error) {
+            status.textContent = error instanceof Error ? error.message : String(error);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      }
+
+      initialize().catch((error) => {
+        document.querySelector('#status').textContent =
+          error instanceof Error ? error.message : String(error);
+      });
+    </script>
+  </body>
+</html>

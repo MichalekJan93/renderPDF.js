@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vp build",
     "preview": "vp preview",
     "test:browser": "playwright test",
+    "test:cross-browser": "playwright test --config playwright.cross-browser.config.ts",
     "check": "vp check && npm run build && npm run test:browser"
   },
   "devDependencies": {

@@ -51,6 +51,30 @@ The [playground](https://github.com/MichalekJan93/renderPDF.js/tree/main/playgro
 provides HTML upload/editing, JSON options, a live preview, export diagnostics
 and timed RenderPDF.js/jsPDF comparisons from a source checkout.
 
+## Measured HTML comparison
+
+We compared the [source build at `78fe8c1`](https://github.com/MichalekJan93/renderPDF.js/commit/78fe8c1f03be721dc6b0d5a88e1f1bfd0cadd885)
+with jsPDF 4.2.1 `html()` in headless Brave 147 on one Apple M4 Pro (October 2026).
+Both used A4, 24 CSS px margins and the same explicit font bytes for each input.
+Times are medians of five exports through Blob serialization; bold marks the
+better measured result.
+
+| Test                                                                                           |           RenderPDF.js |                  jsPDF |
+| ---------------------------------------------------------------------------------------------- | ---------------------: | ---------------------: |
+| 24 short fixtures (up to 4 pages): faster median                                               |              **21/24** |                   3/24 |
+| 24 short fixtures: smaller PDF                                                                 |              **22/24** |                   2/24 |
+| 16 one-page fixtures: closer browser pixels                                                    |              **16/16** |                   0/16 |
+| [200-row directory](playground/src/examples/example-1.html): time / PDF bytes                  |     1.21 s / 405,837 B | **0.68 s / 320,758 B** |
+| [1,000-row inventory](playground/src/examples/example-2.html), matched fonts: time / PDF bytes | 1.74 s / **415,956 B** | **1.64 s** / 620,478 B |
+
+Both exporters retained all 460 text markers in the short documents, although
+marker page placement differed in four. The longer examples were separate runs:
+PDF.js found all 200 complete directory IDs and 1,000 complete inventory names
+in RenderPDF.js output, while one ID and one name were incomplete in the inspected
+jsPDF outputs. The visual count covers only one-page cases compared at equal scale.
+These are results for the linked source build and these fixtures on one machine;
+that build has not yet been published to npm.
+
 ## Create a document
 
 ```ts
